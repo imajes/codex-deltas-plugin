@@ -1,0 +1,51 @@
+# Codex Git Changelog Rules
+
+- Read automation memory first from `~/.codex/automations/codex-git-changelog/memory.md`.
+- Use only the bare HTTPS mirror under `~/.codex/automations/codex-git-changelog/repos/openai-codex.git` for repository history, commit ranges, and destination SHA selection.
+- Determine `from` from memory field `last_reported_origin_main_sha`.
+- Update the mirror before determining `to`. If mirror update fails, stop immediately and produce a failure-only report.
+- Treat `config-maintenance` as the only config workflow.
+- For non-empty ranges, consume config artifacts in this order:
+  1. `config-maintenance-summary.md`
+  2. `validation.md`
+  3. lifecycle inventory JSON summary
+  4. synced clean file
+  5. proposed runtime file
+  6. baseline-vs-runtime diff
+  7. proposed patch diff
+- Do not re-derive config lifecycle or schema policy in the report prompt or prose.
+- Report sections are:
+  - `## Range`
+  - `## TL;DR`
+  - `## User-Facing Changes`
+  - `## Config & Feature Flags`
+  - `## API/Library/Internal`
+  - `## Risk Summary`
+  - `## Config Diff (Baseline vs Runtime)`
+  - `## Proposed Config Patch (Current vs Proposed)`
+  - `## No-Change Note` only when the range is empty
+  - `## Failure` only when the run fails
+- Required report details are:
+  - include `from`, `to`, and commit count
+  - include classification summary exactly as `new: N, pre-schema: N, legacy: N, removed: N`
+  - clearly distinguish visibility diff versus actionable proposed patch diff
+  - print the full Markdown report in the conversation
+  - save the same substance to `~/.codex/config/deltas/<to_short_sha>/repo-delta-<from_or_init>.md`
+- On full success, compact automation memory to:
+  - `repo_url`
+  - `mirror_path`
+  - `last_successful_fetch_origin_main_sha`
+  - `last_reported_origin_main_sha`
+  - `last_reported_range`
+  - `last_successful_fetch_at`
+  - short rolling status note
+- If mirror update succeeds but report generation or config-maintenance fails:
+  - update `last_successful_fetch_origin_main_sha`
+  - update `last_successful_fetch_at`
+  - do not update `last_reported_origin_main_sha`
+  - do not update `last_reported_range`
+  - update the rolling status note with failure stage and artifact path
+- If mirror update fails:
+  - do not advance fetched or reported SHAs
+  - keep memory compact
+  - update only the rolling status note with the mirror failure

@@ -19,6 +19,14 @@ Run the full config-maintenance pipeline. This skill orchestrates config work on
 2. Use `config-file-sync` in either `layout-only` or full sync mode.
 3. Use `config-validate` to validate the generated outputs.
 4. Align inline comments, generate diffs, and emit a manifest-style markdown summary under `~/.codex/config/deltas/<short-sha>/`.
+5. In `prepare-changelog-artifacts` mode, source current schema and feature truth from the bare mirror at the exact destination ref instead of trusting a local checkout to be current.
+6. Treat `config-maintenance-summary.md` and `validation.md` as canonical even on failure; this workflow must leave usable artifacts behind for higher-level reporting.
+
+## Output contract
+
+- This skill owns config classification, sync, validation, and config diff artifacts.
+- This skill does not own repository-change narration or final changelog report formatting.
+- Higher-level report workflows should consume the emitted artifacts instead of re-deriving config policy in prompt prose.
 
 ## Script
 
