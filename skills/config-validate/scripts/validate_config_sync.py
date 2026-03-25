@@ -112,6 +112,23 @@ def validate_platform_feature_split(block: TomlBlock | None) -> list[str]:
     return []
 
 
+def validate_runtime_permissions(parsed_runtime, runtime_blocks: list[TomlBlock]) -> list[str]:
+    failures: list[str] = []
+    if getattr(parsed_runtime, "get", None) is None:
+        return failures
+
+    if parsed_runtime.get("default_permissions") != "workspace":
+        failures.append('runtime proposal must set `default_permissions = "workspace"`')
+
+    permissions = parsed_runtime.get("permissions")
+    if getattr(permissions, "__contains__", None) is not None and "network" in permissions:
+        failures.append("runtime proposal still uses [permissions.network]")
+    elif find_block(runtime_blocks, "permissions.network") is not None:
+        failures.append("runtime proposal still uses [permissions.network]")
+
+    return failures
+
+
 def main() -> int:
     args = parse_args()
     inventory = {"summary": {}}
@@ -122,13 +139,14 @@ def main() -> int:
     clean_text = read_text(args.clean)
     runtime_text = read_text(args.runtime)
     failures: list[str] = []
+    parsed_runtime = None
 
     try:
         toml_loads(clean_text)
     except Exception as exc:
         failures.append(f"config-CLEAN TOML parse failed: {exc}")
     try:
-        toml_loads(runtime_text)
+        parsed_runtime = toml_loads(runtime_text)
     except Exception as exc:
         failures.append(f"proposed runtime TOML parse failed: {exc}")
 
@@ -171,8 +189,7 @@ def main() -> int:
                 if entry.path in runtime_active_paths:
                     failures.append(f"legacy key still active in runtime proposal: {entry.path}")
 
-        if find_block(runtime_blocks, "permissions.network") is not None:
-            failures.append("runtime proposal still uses [permissions.network]")
+        failures.extend(validate_runtime_permissions(parsed_runtime, runtime_blocks))
 
     summary_lines = [
         "# Config Maintenance Validation",

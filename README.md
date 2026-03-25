@@ -20,4 +20,5 @@ Examples:
 ```bash
 uv sync
 uv run python skills/config-maintenance/scripts/run_config_maintenance.py --help
+uv run --group dev pytest -q
 ```

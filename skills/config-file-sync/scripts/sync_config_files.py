@@ -290,6 +290,16 @@ def split_path(path: str) -> list[str]:
     return [strip_quotes(part) for part in split_header_path(path)]
 
 
+def merge_toml_tables(target, source) -> None:
+    for key, value in source.items():
+        if key not in target:
+            target[key] = value
+            continue
+        existing = target[key]
+        if hasattr(existing, "items") and hasattr(value, "items"):
+            merge_toml_tables(existing, value)
+
+
 def runtime_doc_with_tomlkit(
     runtime_text: str,
     remove_paths: set[str],
@@ -325,7 +335,11 @@ def runtime_doc_with_tomlkit(
         if workspace is None:
             workspace = tomlkit.table()
             permissions["workspace"] = workspace
-        workspace["network"] = network
+        workspace_network = workspace.get("network")
+        if workspace_network is None:
+            workspace["network"] = network
+        else:
+            merge_toml_tables(workspace_network, network)
 
     for path in sorted(remove_paths):
         remove_runtime_doc_path(document, split_path(path))
