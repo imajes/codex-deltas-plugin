@@ -23,7 +23,7 @@ Validate generated config artifacts. This skill owns policy checks only.
 ## Script
 
 ```bash
-python3 "$CODEX_HOME/skills/config-validate/scripts/validate_config_sync.py" --help
+uv run --project /Users/james/src/codex-hacks/config-deltas python skills/config-validate/scripts/validate_config_sync.py --help
 ```
 
 ## Boundaries

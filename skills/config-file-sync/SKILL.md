@@ -24,7 +24,7 @@ Rewrite the clean baseline and proposed runtime config from a lifecycle inventor
 ## Scripts
 
 ```bash
-python3 "$CODEX_HOME/skills/config-file-sync/scripts/sync_config_files.py" --help
+uv run --project /Users/james/src/codex-hacks/config-deltas python skills/config-file-sync/scripts/sync_config_files.py --help
 ```
 
 ## Boundaries

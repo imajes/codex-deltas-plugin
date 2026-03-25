@@ -41,7 +41,7 @@ Classify Codex config keys before touching either config file. This skill is the
 Run:
 
 ```bash
-python3 "$CODEX_HOME/skills/config-key-lifecycle/scripts/classify_config_keys.py" --help
+uv run --project /Users/james/src/codex-hacks/config-deltas python skills/config-key-lifecycle/scripts/classify_config_keys.py --help
 ```
 
 ## References

@@ -10,3 +10,14 @@ This repo owns:
 - `skills/config-maintenance/`
 
 The live Codex skill entrypoints under `~/.codex` should point back here via symlinks.
+
+## Runtime
+
+Use `uv` for dependency management and script execution.
+
+Examples:
+
+```bash
+uv sync
+uv run python skills/config-maintenance/scripts/run_config_maintenance.py --help
+```

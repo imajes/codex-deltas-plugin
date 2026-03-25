@@ -6,6 +6,16 @@ import os
 import sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+VENDOR_DIR = REPO_ROOT / ".vendor"
+if str(VENDOR_DIR) not in sys.path:
+    sys.path.insert(0, str(VENDOR_DIR))
+
+try:
+    import tomlkit
+except ModuleNotFoundError:
+    tomlkit = None
+
 
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
 LIB_DIR = CODEX_HOME / "lib"
@@ -28,6 +38,7 @@ from codex_config.shared import load_legacy_feature_aliases
 from codex_config.shared import parse_key_name
 from codex_config.shared import read_text
 from codex_config.shared import render_toml_blocks
+from codex_config.shared import split_header_path
 from codex_config.shared import sort_block_body_lines
 from codex_config.shared import sort_block_groups
 from codex_config.shared import sort_root_scalar_lines
@@ -269,6 +280,73 @@ def apply_runtime_removals(blocks: list[TomlBlock], remove_paths: set[str]) -> N
         block.body_lines = sort_block_body_lines(block.body_lines)
 
 
+def strip_quotes(segment: str) -> str:
+    if len(segment) >= 2 and segment[0] == segment[-1] and segment[0] in {'"', "'"}:
+        return segment[1:-1]
+    return segment
+
+
+def split_path(path: str) -> list[str]:
+    return [strip_quotes(part) for part in split_header_path(path)]
+
+
+def runtime_doc_with_tomlkit(
+    runtime_text: str,
+    remove_paths: set[str],
+):
+    if tomlkit is None:
+        return None
+    document = tomlkit.parse(runtime_text)
+
+    for key_name in (
+        "experimental_use_freeform_apply_patch",
+        "experimental_use_unified_exec_tool",
+    ):
+        document.pop(key_name, None)
+
+    if "default_permissions" not in document:
+        sandbox_mode = "sandbox_mode" in document
+        if sandbox_mode:
+            items = list(document.items())
+            document.clear()
+            for key, value in items:
+                document[key] = value
+                if key == "sandbox_mode":
+                    document["default_permissions"] = "workspace"
+        else:
+            document["default_permissions"] = "workspace"
+    else:
+        document["default_permissions"] = "workspace"
+
+    permissions = document.get("permissions")
+    if permissions is not None and "network" in permissions:
+        network = permissions.pop("network")
+        workspace = permissions.get("workspace")
+        if workspace is None:
+            workspace = tomlkit.table()
+            permissions["workspace"] = workspace
+        workspace["network"] = network
+
+    for path in sorted(remove_paths):
+        remove_runtime_doc_path(document, split_path(path))
+
+    return tomlkit.dumps(document)
+
+
+def remove_runtime_doc_path(node, path_parts: list[str]) -> None:
+    if not path_parts:
+        return
+    if len(path_parts) == 1:
+        node.pop(path_parts[0], None)
+        return
+    child = node.get(path_parts[0])
+    if child is None:
+        return
+    remove_runtime_doc_path(child, path_parts[1:])
+    if hasattr(child, "items") and not list(child.items()):
+        node.pop(path_parts[0], None)
+
+
 def main() -> int:
     args = parse_args()
     clean_root, clean_blocks = split_toml_blocks(read_text(args.config_clean))
@@ -352,11 +430,14 @@ def main() -> int:
     clean_blocks = sort_block_groups(clean_blocks)
     write_text(args.output_clean, render_toml_blocks(clean_root, clean_blocks))
 
-    runtime_root = migrate_runtime_permissions(runtime_root, runtime_blocks)
-    runtime_root = remove_runtime_root_aliases(runtime_root)
-    apply_runtime_removals(runtime_blocks, runtime_remove_paths)
-    runtime_blocks = sort_block_groups(runtime_blocks)
-    write_text(args.output_runtime, render_toml_blocks(runtime_root, runtime_blocks))
+    runtime_output = runtime_doc_with_tomlkit(read_text(args.config_runtime), runtime_remove_paths)
+    if runtime_output is None:
+        runtime_root = migrate_runtime_permissions(runtime_root, runtime_blocks)
+        runtime_root = remove_runtime_root_aliases(runtime_root)
+        apply_runtime_removals(runtime_blocks, runtime_remove_paths)
+        runtime_blocks = sort_block_groups(runtime_blocks)
+        runtime_output = render_toml_blocks(runtime_root, runtime_blocks)
+    write_text(args.output_runtime, runtime_output)
 
     print(args.output_clean)
     print(args.output_runtime)

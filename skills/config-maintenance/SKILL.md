@@ -23,7 +23,7 @@ Run the full config-maintenance pipeline. This skill orchestrates config work on
 ## Script
 
 ```bash
-python3 "$CODEX_HOME/skills/config-maintenance/scripts/run_config_maintenance.py" --help
+uv run --project /Users/james/src/codex-hacks/config-deltas python skills/config-maintenance/scripts/run_config_maintenance.py --help
 ```
 
 ## References

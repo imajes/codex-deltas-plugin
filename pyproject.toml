@@ -1,0 +1,12 @@
+[project]
+name = "codex-config-deltas"
+version = "0.1.0"
+description = "Codex config maintenance skills and supporting tooling"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "tomlkit>=0.13,<1",
+]
+
+[tool.uv]
+package = false
