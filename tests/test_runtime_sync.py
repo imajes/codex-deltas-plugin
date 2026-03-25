@@ -263,3 +263,126 @@ def test_run_config_maintenance_writes_summary_artifacts_on_classify_failure(
     summary_text = summary_output.read_text(encoding="utf-8")
     assert "- stage: `classify`" in summary_text
     assert "classification exploded" in summary_text
+
+
+def test_materialize_truth_sources_reads_exact_ref_from_mirror(tmp_path: Path, monkeypatch) -> None:
+    mirror = tmp_path / "mirror.git"
+    run_dir = tmp_path / "run"
+    expected = {
+        "codex-rs/core/config.schema.json": '{"type":"object"}',
+        "codex-rs/features/src/lib.rs": "pub const FEATURES: &[FeatureSpec] = &[];",
+        "codex-rs/features/src/legacy.rs": "pub const LEGACY: &[Alias] = &[];",
+    }
+
+    def fake_run_stdout(command: list[str]) -> str:
+        assert command[:2] == ["git", f"--git-dir={mirror}"]
+        _, _, _, show_spec = command
+        ref, relative_path = show_spec.split(":", 1)
+        assert ref == "abcdef1234567890"
+        return expected[relative_path]
+
+    monkeypatch.setattr(run_config_maintenance, "run_stdout", fake_run_stdout)
+
+    truth_sources = run_config_maintenance.materialize_truth_sources(
+        run_dir,
+        mirror,
+        "abcdef1234567890",
+    )
+
+    assert truth_sources["schema"].read_text(encoding="utf-8") == expected["codex-rs/core/config.schema.json"]
+    assert truth_sources["features_lib"].read_text(encoding="utf-8") == expected["codex-rs/features/src/lib.rs"]
+    assert truth_sources["legacy_features"].read_text(encoding="utf-8") == expected["codex-rs/features/src/legacy.rs"]
+
+
+def test_prepare_changelog_artifacts_uses_materialized_mirror_truth(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "stale-repo"
+    repo.mkdir()
+    mirror = tmp_path / "mirror.git"
+    clean = tmp_path / "config-CLEAN.toml"
+    runtime = tmp_path / "config.toml"
+    clean.write_text("[features]\nfeature_a = true\n", encoding="utf-8")
+    runtime.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+
+    delta_dir = tmp_path / "deltas"
+    automation_dir = tmp_path / "automations"
+    skills_dir = tmp_path / "skills"
+    truth_root = tmp_path / "materialized-truth"
+    truth_root.mkdir()
+    schema_path = truth_root / "config.schema.json"
+    features_path = truth_root / "lib.rs"
+    legacy_path = truth_root / "legacy.rs"
+    schema_path.write_text('{"type":"object"}', encoding="utf-8")
+    features_path.write_text("features", encoding="utf-8")
+    legacy_path.write_text("legacy", encoding="utf-8")
+
+    monkeypatch.setattr(run_config_maintenance, "DELTA_DIR", delta_dir)
+    monkeypatch.setattr(run_config_maintenance, "AUTOMATION_DIR", automation_dir)
+    monkeypatch.setattr(run_config_maintenance, "SKILLS_DIR", skills_dir)
+    monkeypatch.setattr(run_config_maintenance, "MIRROR_PATH", mirror)
+    monkeypatch.setattr(run_config_maintenance, "ALIGN_TOOL", tmp_path / "align_toml_inline_comments")
+    monkeypatch.setattr(
+        run_config_maintenance,
+        "parse_args",
+        lambda: argparse.Namespace(
+            mode="prepare-changelog-artifacts",
+            repo=repo,
+            mirror=mirror,
+            from_sha="1234567890abcdef",
+            config_clean=clean,
+            config_runtime=runtime,
+        ),
+    )
+    monkeypatch.setattr(run_config_maintenance, "ensure_mirror", lambda path: "abcdef1234567890")
+    monkeypatch.setattr(
+        run_config_maintenance,
+        "materialize_truth_sources",
+        lambda run_dir, git_dir, ref: {
+            "schema": schema_path,
+            "features_lib": features_path,
+            "legacy_features": legacy_path,
+        },
+    )
+
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        command_text = " ".join(command)
+        if "classify_config_keys.py" in command_text:
+            output_index = command.index("--output") + 1
+            output_path = Path(command[output_index])
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                '{"summary":{"new":0,"pre-schema":0,"legacy":0,"removed":0},"entries":[]}',
+                encoding="utf-8",
+            )
+        elif "validate_config_sync.py" in command_text:
+            output_index = command.index("--output") + 1
+            output_path = Path(command[output_index])
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                "# Config Maintenance Validation\n\n## Result\n\n- validation passed\n",
+                encoding="utf-8",
+            )
+        elif "sync_config_files.py" in command_text:
+            clean_output = Path(command[command.index("--output-clean") + 1])
+            runtime_output = Path(command[command.index("--output-runtime") + 1])
+            clean_output.parent.mkdir(parents=True, exist_ok=True)
+            clean_output.write_text("[features]\nfeature_a = true\n", encoding="utf-8")
+            runtime_output.write_text('default_permissions = "workspace"\n', encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(run_config_maintenance, "run", fake_run)
+
+    exit_code = run_config_maintenance.main()
+
+    classify_command = next(command for command in commands if "classify_config_keys.py" in " ".join(command))
+    assert exit_code == 0
+    assert "--git-dir" in classify_command
+    assert classify_command[classify_command.index("--repo") + 1] == str(mirror)
+    assert classify_command[classify_command.index("--schema") + 1] == str(schema_path)
+    assert classify_command[classify_command.index("--features-lib") + 1] == str(features_path)
+    assert classify_command[classify_command.index("--legacy-features") + 1] == str(legacy_path)

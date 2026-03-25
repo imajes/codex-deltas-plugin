@@ -88,6 +88,37 @@ def ensure_mirror(path: Path) -> str:
     return run_stdout(["git", f"--git-dir={path}", "rev-parse", "refs/heads/main"])
 
 
+def materialize_truth_file(git_dir: Path, ref: str, relative_path: str, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    content = run_stdout(["git", f"--git-dir={git_dir}", "show", f"{ref}:{relative_path}"])
+    output_path.write_text(content, encoding="utf-8")
+    return output_path
+
+
+def materialize_truth_sources(run_dir: Path, git_dir: Path, ref: str) -> dict[str, Path]:
+    truth_root = run_dir / "truth-source"
+    return {
+        "schema": materialize_truth_file(
+            git_dir,
+            ref,
+            "codex-rs/core/config.schema.json",
+            truth_root / "codex-rs" / "core" / "config.schema.json",
+        ),
+        "features_lib": materialize_truth_file(
+            git_dir,
+            ref,
+            "codex-rs/features/src/lib.rs",
+            truth_root / "codex-rs" / "features" / "src" / "lib.rs",
+        ),
+        "legacy_features": materialize_truth_file(
+            git_dir,
+            ref,
+            "codex-rs/features/src/legacy.rs",
+            truth_root / "codex-rs" / "features" / "src" / "legacy.rs",
+        ),
+    }
+
+
 def script_path(skill: str, relative: str) -> Path:
     return SKILLS_DIR / skill / relative
 
@@ -199,6 +230,11 @@ def main() -> int:
     features_lib = args.repo / "codex-rs" / "features" / "src" / "lib.rs"
     legacy_features = args.repo / "codex-rs" / "features" / "src" / "legacy.rs"
     schema = args.repo / "codex-rs" / "core" / "config.schema.json"
+    if args.mode == "prepare-changelog-artifacts":
+        truth_sources = materialize_truth_sources(run_dir, args.mirror, current_sha)
+        features_lib = truth_sources["features_lib"]
+        legacy_features = truth_sources["legacy_features"]
+        schema = truth_sources["schema"]
 
     inventory = {"summary": {}}
     stage_results: list[dict[str, object]] = []
