@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -35,6 +37,10 @@ shared = load_module(
 validate_config_sync = load_module(
     "validate_config_sync",
     "skills/config-validate/scripts/validate_config_sync.py",
+)
+run_config_maintenance = load_module(
+    "run_config_maintenance",
+    "skills/config-maintenance/scripts/run_config_maintenance.py",
 )
 
 
@@ -183,3 +189,77 @@ enabled = true
         'runtime proposal must set `default_permissions = "workspace"`',
         "runtime proposal still uses [permissions.network]",
     ]
+
+
+def test_parse_active_keys_ignores_comment_text_when_reading_false() -> None:
+    block = shared.TomlBlock(
+        header="features",
+        header_line="[features]",
+        body_lines=[
+            'feature_a = false  # this comment mentions true but should stay false',
+            "feature_b = true",
+        ],
+    )
+
+    assert validate_config_sync.parse_active_keys(block) == {
+        "feature_a": False,
+        "feature_b": True,
+    }
+
+
+def test_run_config_maintenance_writes_summary_artifacts_on_classify_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    clean = tmp_path / "config-CLEAN.toml"
+    runtime = tmp_path / "config.toml"
+    clean.write_text("[features]\nfeature_a = true\n", encoding="utf-8")
+    runtime.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+
+    delta_dir = tmp_path / "deltas"
+    automation_dir = tmp_path / "automations"
+    skills_dir = tmp_path / "skills"
+    mirror = tmp_path / "mirror.git"
+
+    monkeypatch.setattr(run_config_maintenance, "DELTA_DIR", delta_dir)
+    monkeypatch.setattr(run_config_maintenance, "AUTOMATION_DIR", automation_dir)
+    monkeypatch.setattr(run_config_maintenance, "SKILLS_DIR", skills_dir)
+    monkeypatch.setattr(run_config_maintenance, "MIRROR_PATH", mirror)
+    monkeypatch.setattr(run_config_maintenance, "ALIGN_TOOL", tmp_path / "align_toml_inline_comments")
+    monkeypatch.setattr(
+        run_config_maintenance,
+        "parse_args",
+        lambda: argparse.Namespace(
+            mode="sync-current",
+            repo=repo,
+            mirror=mirror,
+            from_sha=None,
+            config_clean=clean,
+            config_runtime=runtime,
+        ),
+    )
+    monkeypatch.setattr(run_config_maintenance, "run_stdout", lambda command: "abcdef1234567890")
+
+    def fake_run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+        command_text = " ".join(command)
+        if "classify_config_keys.py" in command_text:
+            return subprocess.CompletedProcess(command, 1, "", "classification exploded")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(run_config_maintenance, "run", fake_run)
+
+    exit_code = run_config_maintenance.main()
+
+    run_dir = delta_dir / "abcdef1"
+    validation_output = run_dir / "validation.md"
+    summary_output = run_dir / "config-maintenance-summary.md"
+
+    assert exit_code == 1
+    assert validation_output.exists()
+    assert summary_output.exists()
+    assert "workflow failed before validation during `classify`" in validation_output.read_text(encoding="utf-8")
+    summary_text = summary_output.read_text(encoding="utf-8")
+    assert "- stage: `classify`" in summary_text
+    assert "classification exploded" in summary_text

@@ -54,7 +54,7 @@ def parse_active_keys(block: TomlBlock | None) -> dict[str, bool]:
             continue
         key_name = parse_key_name(line)
         if key_name:
-            keys[key_name] = "true" in line.split("=", 1)[1]
+            keys[key_name] = toml_loads(line.strip()).get(key_name) is True
     return keys
 
 

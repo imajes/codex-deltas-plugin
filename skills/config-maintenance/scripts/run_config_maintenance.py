@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -49,6 +51,24 @@ def run_stdout(command: list[str]) -> str:
     return run(command).stdout.strip()
 
 
+def render_command(command: list[str]) -> str:
+    return shlex.join(command)
+
+
+def run_stage(stage_results: list[dict[str, object]], name: str, command: list[str]) -> subprocess.CompletedProcess[str]:
+    result = run(command, check=False)
+    stage_results.append(
+        {
+            "name": name,
+            "command": render_command(command),
+            "returncode": result.returncode,
+            "stdout": result.stdout.strip(),
+            "stderr": result.stderr.strip(),
+        }
+    )
+    return result
+
+
 def ensure_mirror(path: Path) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
@@ -72,17 +92,17 @@ def script_path(skill: str, relative: str) -> Path:
     return SKILLS_DIR / skill / relative
 
 
-def align_toml(path: Path) -> None:
+def align_toml(path: Path) -> subprocess.CompletedProcess[str]:
     column = os.environ.get("CODEX_CONFIG_COMMENT_COLUMN", "120")
     check_result = run(
         [str(ALIGN_TOOL), "--check", "--column", column, str(path)],
         check=False,
     )
     if check_result.returncode == 0:
-        return
-    subprocess.run(
+        return check_result
+    return run(
         [str(ALIGN_TOOL), "--column", column, str(path)],
-        check=True,
+        check=False,
     )
 
 
@@ -100,7 +120,54 @@ def write_diff(before: Path, after: Path, output: Path) -> None:
 
 def sync_canonical_clean(versioned_clean: Path, canonical_clean: Path) -> None:
     shutil.copyfile(versioned_clean, canonical_clean)
-    align_toml(canonical_clean)
+    align_result = align_toml(canonical_clean)
+    if align_result.returncode != 0:
+        raise RuntimeError(
+            f"failed to align canonical clean file: {align_result.stderr.strip() or align_result.stdout.strip()}"
+        )
+
+
+def write_placeholder_validation(
+    path: Path,
+    *,
+    clean: Path,
+    runtime: Path,
+    inventory: dict[str, object],
+    failure_stage: str | None,
+    failure_message: str,
+) -> None:
+    summary = inventory.get("summary", {}) if isinstance(inventory, dict) else {}
+    lines = [
+        "# Config Maintenance Validation",
+        "",
+        f"- clean: `{clean}`",
+        f"- runtime: `{runtime}`",
+        f"- summary: `new={summary.get('new', 0)}` "
+        f"`pre-schema={summary.get('pre-schema', 0)}` "
+        f"`legacy={summary.get('legacy', 0)}` "
+        f"`removed={summary.get('removed', 0)}`",
+        "",
+        "## Failures",
+        "",
+        f"- workflow failed before validation{f' during `{failure_stage}`' if failure_stage else ''}",
+        f"- {failure_message}",
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_stage_section(lines: list[str], stage_results: list[dict[str, object]]) -> None:
+    if not stage_results:
+        return
+    lines.extend(["## Stages", ""])
+    for stage in stage_results:
+        lines.append(
+            f"- `{stage['name']}` exit `{stage['returncode']}`: `{stage['command']}`"
+        )
+        if stage["stderr"]:
+            lines.append(f"  stderr: `{stage['stderr']}`")
+        elif stage["stdout"]:
+            lines.append(f"  stdout: `{stage['stdout']}`")
+    lines.append("")
 
 
 def main() -> int:
@@ -134,6 +201,11 @@ def main() -> int:
     schema = args.repo / "codex-rs" / "core" / "config.schema.json"
 
     inventory = {"summary": {}}
+    stage_results: list[dict[str, object]] = []
+    workflow_failed = False
+    failure_stage: str | None = None
+    failure_message = ""
+    validation_result: subprocess.CompletedProcess[str] | None = None
     sync_cmd = [
         sys.executable,
         str(sync),
@@ -182,44 +254,109 @@ def main() -> int:
             classify_cmd.extend(["--from-sha", compare_sha])
         if args.mode == "prepare-changelog-artifacts":
             classify_cmd.append("--git-dir")
-        subprocess.run(classify_cmd, check=True)
-        inventory = __import__("json").loads(inventory_path.read_text(encoding="utf-8"))
-        sync_cmd.extend(
-            [
-                "--inventory",
-                str(inventory_path),
-                "--features-lib",
-                str(features_lib),
-                "--legacy-features",
-                str(legacy_features),
-            ]
+        classify_result = run_stage(stage_results, "classify", classify_cmd)
+        if classify_result.returncode != 0:
+            workflow_failed = True
+            failure_stage = "classify"
+            failure_message = classify_result.stderr.strip() or classify_result.stdout.strip() or "classification failed"
+        else:
+            try:
+                inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                workflow_failed = True
+                failure_stage = "classify"
+                failure_message = f"failed to parse inventory output: {exc}"
+            else:
+                sync_cmd.extend(
+                    [
+                        "--inventory",
+                        str(inventory_path),
+                        "--features-lib",
+                        str(features_lib),
+                        "--legacy-features",
+                        str(legacy_features),
+                    ]
+                )
+                validate_cmd.extend(
+                    [
+                        "--inventory",
+                        str(inventory_path),
+                        "--features-lib",
+                        str(features_lib),
+                    ]
+                )
+
+    if not workflow_failed:
+        sync_result = run_stage(stage_results, "sync", sync_cmd)
+        if sync_result.returncode != 0:
+            workflow_failed = True
+            failure_stage = "sync"
+            failure_message = sync_result.stderr.strip() or sync_result.stdout.strip() or "sync failed"
+
+    if not workflow_failed:
+        align_clean_result = align_toml(clean_output)
+        stage_results.append(
+            {
+                "name": "align-clean",
+                "command": render_command([str(ALIGN_TOOL), "--column", os.environ.get("CODEX_CONFIG_COMMENT_COLUMN", "120"), str(clean_output)]),
+                "returncode": align_clean_result.returncode,
+                "stdout": align_clean_result.stdout.strip(),
+                "stderr": align_clean_result.stderr.strip(),
+            }
         )
-        validate_cmd.extend(
-            [
-                "--inventory",
-                str(inventory_path),
-                "--features-lib",
-                str(features_lib),
-            ]
+        if align_clean_result.returncode != 0:
+            workflow_failed = True
+            failure_stage = "align-clean"
+            failure_message = align_clean_result.stderr.strip() or align_clean_result.stdout.strip() or "clean alignment failed"
+
+    if not workflow_failed and args.mode != "alpha-sort-only":
+        align_runtime_result = align_toml(runtime_output)
+        stage_results.append(
+            {
+                "name": "align-runtime",
+                "command": render_command([str(ALIGN_TOOL), "--column", os.environ.get("CODEX_CONFIG_COMMENT_COLUMN", "120"), str(runtime_output)]),
+                "returncode": align_runtime_result.returncode,
+                "stdout": align_runtime_result.stdout.strip(),
+                "stderr": align_runtime_result.stderr.strip(),
+            }
         )
+        if align_runtime_result.returncode != 0:
+            workflow_failed = True
+            failure_stage = "align-runtime"
+            failure_message = align_runtime_result.stderr.strip() or align_runtime_result.stdout.strip() or "runtime alignment failed"
 
-    subprocess.run(sync_cmd, check=True)
-
-    align_toml(clean_output)
-    if args.mode != "alpha-sort-only":
-        align_toml(runtime_output)
-
-    validate_result = run(validate_cmd, check=False)
+    if not workflow_failed:
+        validation_result = run_stage(stage_results, "validate", validate_cmd)
 
     if args.mode == "alpha-sort-only":
-        write_diff(args.config_clean, clean_output, baseline_diff)
-        write_diff(args.config_runtime, runtime_output, proposed_diff)
+        if clean_output.exists():
+            write_diff(args.config_clean, clean_output, baseline_diff)
+        if runtime_output.exists():
+            write_diff(args.config_runtime, runtime_output, proposed_diff)
     else:
-        write_diff(clean_output, args.config_runtime, baseline_diff)
-        write_diff(args.config_runtime, runtime_output, proposed_diff)
+        if clean_output.exists():
+            write_diff(clean_output, args.config_runtime, baseline_diff)
+        if runtime_output.exists():
+            write_diff(args.config_runtime, runtime_output, proposed_diff)
 
-    if validate_result.returncode == 0 and args.mode != "alpha-sort-only":
+    if validation_result is not None and validation_result.returncode == 0 and args.mode != "alpha-sort-only":
         sync_canonical_clean(clean_output, args.config_clean)
+
+    if validation_result is None or not validation_output.exists():
+        write_placeholder_validation(
+            validation_output,
+            clean=clean_output,
+            runtime=runtime_output,
+            inventory=inventory,
+            failure_stage=failure_stage,
+            failure_message=(
+                failure_message
+                or (validation_result.stderr.strip() if validation_result is not None else "")
+                or "maintenance workflow failed"
+            ),
+        )
+
+    validation_exit_code = validation_result.returncode if validation_result is not None else 1
 
     summary_lines = [
         "# Config Maintenance Summary",
@@ -234,20 +371,31 @@ def main() -> int:
         f"- classification summary: `new: {inventory['summary'].get('new', 0)}, pre-schema: {inventory['summary'].get('pre-schema', 0)}, legacy: {inventory['summary'].get('legacy', 0)}, removed: {inventory['summary'].get('removed', 0)}`",
         f"- inventory: `{inventory_path if args.mode != 'alpha-sort-only' else 'not generated'}`",
         f"- synchronized clean artifact: `{clean_output}`",
-        f"- canonical clean synced: `{'yes' if validate_result.returncode == 0 and args.mode != 'alpha-sort-only' else 'no'}`",
+        f"- canonical clean synced: `{'yes' if validation_result is not None and validation_result.returncode == 0 and args.mode != 'alpha-sort-only' else 'no'}`",
         f"- proposed runtime artifact: `{runtime_output}`",
         f"- baseline diff: `{baseline_diff}`",
         f"- proposed patch diff: `{proposed_diff}`",
         f"- validation: `{validation_output}`",
-        f"- validation_exit_code: `{validate_result.returncode}`",
+        f"- validation_exit_code: `{validation_exit_code}`",
         "",
     ]
-    if validate_result.stderr.strip():
-        summary_lines.extend(["## Validation stderr", "", "```text", validate_result.stderr.strip(), "```", ""])
+    if workflow_failed:
+        summary_lines.extend(
+            [
+                "## Workflow Failure",
+                "",
+                f"- stage: `{failure_stage or 'unknown'}`",
+                f"- message: `{failure_message or 'maintenance workflow failed'}`",
+                "",
+            ]
+        )
+    write_stage_section(summary_lines, stage_results)
+    if validation_result is not None and validation_result.stderr.strip():
+        summary_lines.extend(["## Validation stderr", "", "```text", validation_result.stderr.strip(), "```", ""])
     summary_lines.extend(validation_output.read_text(encoding="utf-8").rstrip().splitlines())
     summary_output.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
     print(summary_output)
-    return validate_result.returncode
+    return validation_exit_code
 
 
 if __name__ == "__main__":
