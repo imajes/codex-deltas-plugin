@@ -1,0 +1,4 @@
+interface:
+  display_name: "Config File Sync"
+  short_description: "Rewrite clean/runtime config artifacts deterministically"
+  default_prompt: "Use $config-file-sync to regenerate clean and runtime config artifacts from the lifecycle inventory."

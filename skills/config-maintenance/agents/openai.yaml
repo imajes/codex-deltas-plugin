@@ -1,0 +1,4 @@
+interface:
+  display_name: "Config Maintenance"
+  short_description: "Run Codex config maintenance end to end"
+  default_prompt: "Use $config-maintenance to classify, sync, validate, and report Codex config changes."
