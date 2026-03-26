@@ -8,6 +8,8 @@ This repo owns:
 - `skills/config-file-sync/`
 - `skills/config-validate/`
 - `skills/config-maintenance/`
+- `skills/codex-git-changelog/`
+- `automations/codex-git-changelog/`
 
 The live Codex skill entrypoints under `~/.codex` should point back here via symlinks.
 
@@ -21,4 +23,5 @@ Examples:
 uv sync
 uv run python skills/config-maintenance/scripts/run_config_maintenance.py --help
 uv run --group dev pytest -q
+just sync-codex-git-changelog-automation
 ```
