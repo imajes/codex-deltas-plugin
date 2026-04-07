@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -45,6 +46,12 @@ from codex_config.shared import sort_root_scalar_lines
 from codex_config.shared import split_toml_blocks
 from codex_config.shared import trim_repeated_blank_lines
 from codex_config.shared import write_text
+
+
+@dataclass(frozen=True)
+class PreservedRuntimeBlocks:
+    ordered_headers: list[str]
+    comment_only_blocks: dict[str, str]
 
 
 def parse_args() -> argparse.Namespace:
@@ -361,10 +368,67 @@ def remove_runtime_doc_path(node, path_parts: list[str]) -> None:
         node.pop(path_parts[0], None)
 
 
+def has_active_assignments(lines: list[str]) -> bool:
+    return any(parse_key_name(line) and not line.lstrip().startswith("#") for line in lines)
+
+
+def collect_comment_only_reference_blocks(runtime_text: str) -> PreservedRuntimeBlocks:
+    _, runtime_blocks = split_toml_blocks(runtime_text)
+    ordered_headers = [block.header for block in runtime_blocks]
+    preserved: dict[str, str] = {}
+    for block in runtime_blocks:
+        if has_active_assignments(block.body_lines):
+            continue
+        preserved[block.header] = "\n".join([block.header_line, *block.body_lines]).rstrip()
+    return PreservedRuntimeBlocks(
+        ordered_headers=ordered_headers,
+        comment_only_blocks=preserved,
+    )
+
+
+def parse_preserved_runtime_block(block_text: str) -> TomlBlock:
+    _, blocks = split_toml_blocks(block_text.rstrip() + "\n")
+    if len(blocks) != 1:
+        raise RuntimeError("expected exactly one preserved runtime block")
+    return blocks[0]
+
+
+def restore_missing_runtime_reference_blocks(
+    runtime_text: str,
+    preserved_blocks: PreservedRuntimeBlocks,
+) -> str:
+    if not preserved_blocks.comment_only_blocks:
+        return runtime_text
+    root_lines, runtime_blocks = split_toml_blocks(runtime_text)
+    current_by_header = {block.header: block for block in runtime_blocks}
+    ordered_blocks: list[TomlBlock] = []
+    consumed_headers: set[str] = set()
+
+    for header in preserved_blocks.ordered_headers:
+        current_block = current_by_header.get(header)
+        if current_block is not None:
+            ordered_blocks.append(current_block)
+            consumed_headers.add(header)
+            continue
+        preserved_text = preserved_blocks.comment_only_blocks.get(header)
+        if preserved_text is None:
+            continue
+        ordered_blocks.append(parse_preserved_runtime_block(preserved_text))
+        consumed_headers.add(header)
+
+    for block in runtime_blocks:
+        if block.header in consumed_headers:
+            continue
+        ordered_blocks.append(block)
+
+    return render_toml_blocks(root_lines, ordered_blocks)
+
+
 def main() -> int:
     args = parse_args()
     clean_root, clean_blocks = split_toml_blocks(read_text(args.config_clean))
-    runtime_root, runtime_blocks = split_toml_blocks(read_text(args.config_runtime))
+    runtime_text = read_text(args.config_runtime)
+    runtime_root, runtime_blocks = split_toml_blocks(runtime_text)
 
     if args.layout_only:
         for block in clean_blocks:
@@ -444,13 +508,19 @@ def main() -> int:
     clean_blocks = sort_block_groups(clean_blocks)
     write_text(args.output_clean, render_toml_blocks(clean_root, clean_blocks))
 
-    runtime_output = runtime_doc_with_tomlkit(read_text(args.config_runtime), runtime_remove_paths)
+    preserved_runtime_blocks = collect_comment_only_reference_blocks(runtime_text)
+
+    runtime_output = runtime_doc_with_tomlkit(runtime_text, runtime_remove_paths)
     if runtime_output is None:
         runtime_root = migrate_runtime_permissions(runtime_root, runtime_blocks)
         runtime_root = remove_runtime_root_aliases(runtime_root)
         apply_runtime_removals(runtime_blocks, runtime_remove_paths)
         runtime_blocks = sort_block_groups(runtime_blocks)
         runtime_output = render_toml_blocks(runtime_root, runtime_blocks)
+    runtime_output = restore_missing_runtime_reference_blocks(
+        runtime_output,
+        preserved_runtime_blocks,
+    )
     write_text(args.output_runtime, runtime_output)
 
     print(args.output_clean)

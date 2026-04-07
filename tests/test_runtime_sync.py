@@ -113,6 +113,64 @@ allowed_domains = ["example.com"]
     assert parsed["permissions"]["workspace"]["network"]["allowed_domains"] == ["example.com"]
 
 
+def test_restore_missing_runtime_reference_blocks_keeps_comment_only_sections() -> None:
+    runtime_text = """
+web_search = "live"
+
+[tools]
+view_image = true
+
+[tools.web_search]
+# allowed_domains = ["example.com"]
+# context_size = "medium"
+
+# [tools.web_search.location]
+# city = "Chicago"
+
+[skills]
+# [[skills.config]]
+# path = "/ABS/PATH/to/skill"
+# enabled = false
+
+# [skills.bundled]
+# enabled = true
+
+[ui]
+show_line_numbers = true
+"""
+
+    preserved_blocks = sync_config_files.collect_comment_only_reference_blocks(runtime_text)
+    output = sync_config_files.runtime_doc_with_tomlkit(
+        runtime_text,
+        {
+            "tools.web_search.city",
+            "tools.web_search.country",
+            "tools.web_search.region",
+            "tools.web_search.timezone",
+            "skills.enabled",
+            "skills.path",
+            "skills.bundled.path",
+        },
+    )
+
+    assert output is not None
+    restored = sync_config_files.restore_missing_runtime_reference_blocks(output, preserved_blocks)
+    _, restored_blocks = shared.split_toml_blocks(restored)
+
+    assert 'web_search = "live"' in restored
+    assert "[tools.web_search]" in restored
+    assert '# [tools.web_search.location]' in restored
+    assert "[skills]" in restored
+    assert "# [[skills.config]]" in restored
+    assert "# [skills.bundled]" in restored
+    assert [block.header for block in restored_blocks] == [
+        "tools",
+        "tools.web_search",
+        "skills",
+        "ui",
+    ]
+
+
 def test_remove_runtime_doc_path_handles_quoted_project_keys() -> None:
     document = tomlkit.parse(
         """
