@@ -11,3 +11,5 @@
 - Stop the automation on mirror update failure; do not report stale ranges as authoritative.
 - Prefer a `layout-only` alpha-sort pass before introducing new keys when the clean file is structurally noisy.
 - If classify, sync, align, or validate fails, still emit `config-maintenance-summary.md` and `validation.md` so higher-level automation can report the failure without improvising config conclusions.
+- The canonical command is `config-maintenance`.
+- From within the plugin tree, invoke it as `uv run config-maintenance ...`.

@@ -49,3 +49,5 @@
   - do not advance fetched or reported SHAs
   - keep memory compact
   - update only the rolling status note with the mirror failure
+- The canonical config-maintenance command is `config-maintenance`.
+- From within the plugin tree, invoke it as `uv run config-maintenance ...`.

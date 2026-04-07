@@ -1,0 +1,21 @@
+{
+  "name": "config-deltas",
+  "description": "Codex config maintenance skills, Python tooling, and changelog automation bundled as a single local plugin.",
+  "skills": "./skills",
+  "interface": {
+    "displayName": "Config Deltas",
+    "shortDescription": "Codex config maintenance and changelog automation.",
+    "longDescription": "Bundles config maintenance, key lifecycle, sync, validation, and Codex git changelog automation into one local plugin.",
+    "developerName": "James",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Automation",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Run config maintenance and summarize the generated artifacts.",
+      "Classify Codex config keys and explain what changed.",
+      "Generate the Codex git changelog using the maintained config workflow."
+    ]
+  }
+}

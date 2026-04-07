@@ -1,12 +1,12 @@
 version = 1
 id = "codex-git-changelog"
 name = "Codex git changelog"
-prompt = "Generate the Codex repository delta report using [$codex-git-changelog](/Users/james/src/codex-hacks/config-deltas/skills/codex-git-changelog/SKILL.md).\n\nTop-level constraints:\n- Read and update automation memory only at `$CODEX_HOME/automations/codex-git-changelog/memory.md`.\n- Use only the bare HTTPS mirror at `/Users/james/.codex/automations/codex-git-changelog/repos/openai-codex.git` for repository history, range truth, and destination SHA selection.\n- Use [$config-maintenance](/Users/james/src/codex-hacks/config-deltas/skills/config-maintenance/SKILL.md) as the only config workflow.\n- Save the final report and config artifacts only under `~/.codex/config/deltas/<to_short_sha>/`.\n- Keep the final report grounded in the actual range and generated artifacts; do not improvise config policy in prompt prose."
+prompt = "Operate from the `config-deltas` plugin and generate the Codex repository delta report using [$codex-git-changelog](skills/codex-git-changelog/SKILL.md).\n\nWorking directories:\n- plugin root: current plugin checkout (`.`)\n- codex repo checkout: `/Users/james/src/artificial_intelligence/codex`\n- automation state: `$CODEX_HOME/automations/codex-git-changelog`\n- artifact root: `$CODEX_HOME/config/deltas`\n\nFollow the plugin skill instructions and get it done."
 status = "ACTIVE"
 rrule = "RRULE:FREQ=HOURLY;INTERVAL=6;BYMINUTE=0;BYDAY=MO,TU,WE,TH,FR"
 execution_environment = "local"
 model = "gpt-5.4"
 reasoning_effort = "high"
-cwds = ["/Users/james/src/artificial_intelligence/codex", "/Users/james/.codex", "/Users/james/src/codex-hacks/config-deltas"]
+cwds = ["/Users/james/src/artificial_intelligence/codex", "/Users/james/.codex", "/Users/james/.agents/plugins/config-deltas"]
 created_at = 1771972261073
 updated_at = 1774481976801
