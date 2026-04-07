@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "codex-config-deltas"
 version = "0.1.0"
@@ -8,10 +12,22 @@ dependencies = [
     "tomlkit>=0.13,<1",
 ]
 
+[project.scripts]
+config-maintenance = "codex_config.commands.config_maintenance:main"
+config-key-lifecycle = "codex_config.commands.config_key_lifecycle:main"
+config-file-sync = "codex_config.commands.config_file_sync:main"
+config-validate = "codex_config.commands.config_validate:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8,<9",
 ]
 
+[tool.setuptools]
+package-dir = {"" = "lib"}
+
+[tool.setuptools.packages.find]
+where = ["lib"]
+
 [tool.uv]
-package = false
+package = true

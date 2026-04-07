@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import re
 import subprocess
 import sys
@@ -15,38 +14,11 @@ LIB_DIR = REPO_ROOT / "lib"
 if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
 
-
-def load_module(name: str, relative_path: str):
-    path = REPO_ROOT / relative_path
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"failed to load module from {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-sync_config_files = load_module(
-    "sync_config_files",
-    "skills/config-file-sync/scripts/sync_config_files.py",
-)
-shared = load_module(
-    "codex_config_shared",
-    "lib/codex_config/shared.py",
-)
-classify_config_keys = load_module(
-    "classify_config_keys",
-    "skills/config-key-lifecycle/scripts/classify_config_keys.py",
-)
-validate_config_sync = load_module(
-    "validate_config_sync",
-    "skills/config-validate/scripts/validate_config_sync.py",
-)
-run_config_maintenance = load_module(
-    "run_config_maintenance",
-    "skills/config-maintenance/scripts/run_config_maintenance.py",
-)
+from codex_config import shared
+from codex_config.commands import config_file_sync as sync_config_files
+from codex_config.commands import config_key_lifecycle as classify_config_keys
+from codex_config.commands import config_maintenance as run_config_maintenance
+from codex_config.commands import config_validate as validate_config_sync
 
 
 def test_runtime_doc_with_tomlkit_migrates_permissions_and_removes_keys() -> None:
