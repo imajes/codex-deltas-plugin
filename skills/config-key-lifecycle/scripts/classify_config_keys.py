@@ -16,10 +16,10 @@ if str(LIB_DIR) not in sys.path:
 from codex_config.shared import FeatureSpecRecord
 from codex_config.shared import InventoryEntry
 from codex_config.shared import build_pre_schema_hints
+from codex_config.shared import build_schema_path_index
 from codex_config.shared import classify_non_feature_key
 from codex_config.shared import codex_home
 from codex_config.shared import dump_json
-from codex_config.shared import flatten_schema_paths
 from codex_config.shared import flatten_toml_paths
 from codex_config.shared import git_show_text
 from codex_config.shared import load_feature_specs
@@ -28,6 +28,7 @@ from codex_config.shared import load_json
 from codex_config.shared import load_legacy_feature_aliases
 from codex_config.shared import load_legacy_feature_aliases_at_ref
 from codex_config.shared import read_text
+from codex_config.shared import schema_path_is_modeled
 from codex_config.shared import to_inventory_payload
 
 
@@ -109,9 +110,11 @@ def build_feature_entries(
 
 def build_non_feature_entries(
     schema_paths: set[str],
+    schema_dynamic_patterns,
     clean_paths: set[str],
     runtime_paths: set[str],
     from_schema_paths: set[str],
+    from_schema_dynamic_patterns,
     pre_schema_hints,
 ) -> list[InventoryEntry]:
     all_paths = sorted(schema_paths | clean_paths | runtime_paths)
@@ -119,8 +122,12 @@ def build_non_feature_entries(
     for path in all_paths:
         if path.startswith("features."):
             continue
-        if path in schema_paths:
-            if from_schema_paths and path not in from_schema_paths:
+        if schema_path_is_modeled(path, schema_paths, schema_dynamic_patterns):
+            if from_schema_paths and not schema_path_is_modeled(
+                path,
+                from_schema_paths,
+                from_schema_dynamic_patterns,
+            ):
                 classification = "new"
                 source = "schema"
                 migration_target = None
@@ -129,7 +136,10 @@ def build_non_feature_entries(
                 classification = "active"
                 source = "schema"
                 migration_target = None
-                note = "Schema-visible current key."
+                if path in schema_paths:
+                    note = "Schema-visible current key."
+                else:
+                    note = "Schema-modeled dynamic key."
         else:
             classification, source, migration_target = classify_non_feature_key(path, pre_schema_hints)
             note = ""
@@ -167,7 +177,7 @@ def build_non_feature_entries(
 def main() -> int:
     args = parse_args()
     current_schema = load_json(args.schema)
-    current_schema_paths = flatten_schema_paths(current_schema)
+    current_schema_paths, current_schema_dynamic_patterns = build_schema_path_index(current_schema)
     clean_paths = flatten_toml_paths(args.config_clean)
     runtime_paths = flatten_toml_paths(args.config_runtime)
 
@@ -176,6 +186,7 @@ def main() -> int:
     pre_schema_hints = build_pre_schema_hints(args.repo, git_dir=args.git_dir)
 
     previous_schema_paths: set[str] = set()
+    previous_schema_dynamic_patterns = []
     previous_specs: dict[str, FeatureSpecRecord] = {}
     previous_aliases: dict[str, str] = {}
     if args.from_sha:
@@ -187,7 +198,9 @@ def main() -> int:
                 "codex-rs/core/config.schema.json",
                 git_dir=args.git_dir,
             )
-            previous_schema_paths = flatten_schema_paths(json.loads(previous_schema_text))
+            previous_schema_paths, previous_schema_dynamic_patterns = build_schema_path_index(
+                json.loads(previous_schema_text)
+            )
             previous_specs = {
                 spec.key: spec
                 for spec in load_feature_specs_at_ref(
@@ -204,6 +217,7 @@ def main() -> int:
             )
         except Exception:
             previous_schema_paths = set()
+            previous_schema_dynamic_patterns = []
             previous_specs = {}
             previous_aliases = {}
 
@@ -215,9 +229,11 @@ def main() -> int:
     )
     non_feature_entries = build_non_feature_entries(
         current_schema_paths,
+        current_schema_dynamic_patterns,
         clean_paths,
         runtime_paths,
         previous_schema_paths,
+        previous_schema_dynamic_patterns,
         pre_schema_hints,
     )
     payload = to_inventory_payload(

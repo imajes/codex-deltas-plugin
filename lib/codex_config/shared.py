@@ -69,6 +69,7 @@ PRE_SCHEMA_PATTERNS = {
         "source": "code",
     },
 }
+DYNAMIC_SCHEMA_SEGMENT_PATTERN = r'(?:[^.]+|"[^"]+"|\'[^\']+\')'
 FEATURE_COMMENT_FALLBACK = {
     "Stable": "bool; feature toggle.",
     "Experimental": "bool; experimental feature toggle.",
@@ -475,36 +476,95 @@ def resolve_schema_ref(schema: dict[str, Any], node: Any) -> Any:
     return node
 
 
-def flatten_schema_paths(schema: dict[str, Any]) -> set[str]:
-    def walk(node: Any, prefix: str = "") -> set[str]:
+def build_schema_path_index(schema: dict[str, Any]) -> tuple[set[str], list[re.Pattern[str]]]:
+    exact_paths: set[str] = set()
+    dynamic_patterns: set[str] = set()
+
+    def record_path(
+        literal_parts: tuple[str, ...] | None,
+        pattern_parts: tuple[str, ...],
+        *,
+        has_dynamic: bool,
+    ) -> None:
+        if not pattern_parts:
+            return
+        if has_dynamic:
+            dynamic_patterns.add("^" + r"\.".join(pattern_parts) + "$")
+            return
+        if literal_parts is not None:
+            exact_paths.add(".".join(literal_parts))
+
+    def walk(
+        node: Any,
+        literal_parts: tuple[str, ...] | None = (),
+        pattern_parts: tuple[str, ...] = (),
+        *,
+        has_dynamic: bool = False,
+    ) -> None:
         node = resolve_schema_ref(schema, node)
-        result: set[str] = set()
         if not isinstance(node, dict):
-            return result
+            return
         for combiner in ("allOf", "anyOf", "oneOf"):
             value = node.get(combiner)
             if isinstance(value, list):
                 for child in value:
-                    result |= walk(child, prefix)
+                    walk(
+                        child,
+                        literal_parts,
+                        pattern_parts,
+                        has_dynamic=has_dynamic,
+                    )
         properties = node.get("properties")
         if isinstance(properties, dict):
             for key, child in properties.items():
-                child_prefix = f"{prefix}.{key}" if prefix else key
-                result |= walk(child, child_prefix)
-            if prefix and (node.get("additionalProperties") or node.get("patternProperties")):
-                result.add(prefix)
-            return result
+                walk(
+                    child,
+                    None if literal_parts is None else literal_parts + (key,),
+                    pattern_parts + (re.escape(key),),
+                    has_dynamic=has_dynamic,
+                )
+
+        dynamic_children: list[Any] = []
+        additional_properties = node.get("additionalProperties")
+        if isinstance(additional_properties, dict):
+            dynamic_children.append(additional_properties)
+        pattern_properties = node.get("patternProperties")
+        if isinstance(pattern_properties, dict):
+            dynamic_children.extend(pattern_properties.values())
+        for child in dynamic_children:
+            walk(
+                child,
+                None,
+                pattern_parts + (DYNAMIC_SCHEMA_SEGMENT_PATTERN,),
+                has_dynamic=True,
+            )
+
         node_type = node.get("type")
-        if prefix and node_type in {"string", "integer", "number", "boolean", "array", "null"}:
-            result.add(prefix)
-        elif prefix and node_type == "object" and (
+        if pattern_parts and node_type in {"string", "integer", "number", "boolean", "array", "null"}:
+            record_path(literal_parts, pattern_parts, has_dynamic=has_dynamic)
+        elif pattern_parts and node_type == "object" and (
             node.get("additionalProperties") is not None
             or node.get("patternProperties") is not None
         ):
-            result.add(prefix)
-        return result
+            record_path(literal_parts, pattern_parts, has_dynamic=has_dynamic)
 
-    return walk(schema)
+    walk(schema)
+    return exact_paths, [re.compile(pattern) for pattern in sorted(dynamic_patterns)]
+
+
+def flatten_schema_paths(schema: dict[str, Any]) -> set[str]:
+    exact_paths, _ = build_schema_path_index(schema)
+    return exact_paths
+
+
+def schema_path_is_modeled(
+    path: str,
+    exact_paths: set[str],
+    dynamic_patterns: list[re.Pattern[str]],
+) -> bool:
+    if path in exact_paths:
+        return True
+    return any(pattern.fullmatch(path) for pattern in dynamic_patterns)
 
 
 def flatten_toml_paths(path: Path) -> set[str]:
@@ -947,11 +1007,6 @@ def build_pre_schema_hints(repo_path: Path, *, git_dir: bool = False) -> list[Pr
             r"^shell_environment_policy\.set\.[^.]+$",
             ("shell_environment_policy", "set"),
             "shell_environment_policy.set",
-        ),
-        (
-            r"^permissions\.[^.]+\.network\.(admin_url|allow_local_binding|allow_unix_sockets|allow_upstream_proxy|allowed_domains|dangerously_allow_all_unix_sockets|dangerously_allow_non_loopback_admin|dangerously_allow_non_loopback_proxy|denied_domains|enable_socks5|enable_socks5_udp|enabled|mode|proxy_url|socks_url)$",
-            ("network", "default_permissions"),
-            "default_permissions",
         ),
         (
             r"^plugins\.[^.]+\.(enabled|path)$",

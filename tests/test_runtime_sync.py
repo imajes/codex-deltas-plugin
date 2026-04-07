@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,10 @@ sync_config_files = load_module(
 shared = load_module(
     "codex_config_shared",
     "lib/codex_config/shared.py",
+)
+classify_config_keys = load_module(
+    "classify_config_keys",
+    "skills/config-key-lifecycle/scripts/classify_config_keys.py",
 )
 validate_config_sync = load_module(
     "validate_config_sync",
@@ -171,6 +176,122 @@ def test_classify_non_feature_key_marks_disabled_reason_as_pre_schema() -> None:
     assert classification == "pre-schema"
     assert source == "code"
     assert migration_target is None
+
+
+def test_build_pre_schema_hints_does_not_blanket_classify_network_family(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(
+        shared,
+        "git_show_text",
+        lambda repo_path, ref, relative_path, git_dir=False: "NetworkToml default_permissions",
+    )
+
+    hints = shared.build_pre_schema_hints(repo, git_dir=True)
+
+    assert not any(
+        hint.pattern.pattern.startswith(r"^permissions\.[^.]+\.network\.")
+        for hint in hints
+    )
+
+
+def test_build_non_feature_entries_keeps_schema_modeled_network_keys_active() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "permissions": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                        "network": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {"type": "boolean"},
+                                "allowed_domains": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                        }
+                    },
+                },
+            }
+        },
+    }
+
+    schema_paths, schema_dynamic_patterns = shared.build_schema_path_index(schema)
+    entries = classify_config_keys.build_non_feature_entries(
+        schema_paths,
+        schema_dynamic_patterns,
+        set(),
+        {
+            "permissions.workspace.network.enabled",
+            "permissions.workspace.network.allowed_domains",
+        },
+        set(),
+        [],
+        [
+            shared.PreSchemaHint(
+                pattern=re.compile(
+                    r"^permissions\.[^.]+\.network\.(enabled|allowed_domains)$"
+                ),
+                note="broad network hint",
+                source="code",
+            )
+        ],
+    )
+    entry_map = {entry.path: entry for entry in entries}
+
+    assert entry_map["permissions.workspace.network.enabled"].classification == "active"
+    assert entry_map["permissions.workspace.network.enabled"].source == "schema"
+    assert (
+        entry_map["permissions.workspace.network.enabled"].note
+        == "Schema-modeled dynamic key."
+    )
+    assert (
+        entry_map["permissions.workspace.network.allowed_domains"].classification
+        == "active"
+    )
+
+
+def test_build_non_feature_entries_marks_dynamic_schema_paths_active() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "agents": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                        "config_file": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                },
+            }
+        },
+    }
+
+    schema_paths, schema_dynamic_patterns = shared.build_schema_path_index(schema)
+    entries = classify_config_keys.build_non_feature_entries(
+        schema_paths,
+        schema_dynamic_patterns,
+        set(),
+        {"agents.default.config_file", "agents.explorer.description"},
+        set(),
+        [],
+        [],
+    )
+    entry_map = {entry.path: entry for entry in entries}
+
+    assert entry_map["agents.default.config_file"].classification == "active"
+    assert entry_map["agents.default.config_file"].source == "schema"
+    assert entry_map["agents.default.config_file"].note == "Schema-modeled dynamic key."
+    assert entry_map["agents.explorer.description"].classification == "active"
 
 
 def test_validate_runtime_permissions_requires_workspace_profile_and_new_shape() -> None:
