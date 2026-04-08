@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analyze Repo"
+  short_description: "Persist repository findings for a discovered Codex delta range"
+  default_prompt: "Use $analyze-repo to turn a discovered Codex delta range into repo-findings.json for later report composition."

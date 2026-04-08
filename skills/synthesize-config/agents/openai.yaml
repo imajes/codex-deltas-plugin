@@ -1,0 +1,4 @@
+interface:
+  display_name: "Synthesize Config"
+  short_description: "Regenerate synced clean and runtime config artifacts"
+  default_prompt: "Use $synthesize-config to rebuild clean/runtime config artifacts from the config findings."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analyze Config"
+  short_description: "Interpret Codex config deltas and classify keys"
+  default_prompt: "Use $analyze-config to classify Codex config deltas before regenerating config outputs."

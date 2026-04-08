@@ -19,8 +19,8 @@ from codex_config.shared import write_text
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Validate synced Codex config artifacts.")
-    parser.add_argument("--inventory", type=Path)
+    parser = argparse.ArgumentParser(description="Validate synthesized Codex config artifacts.")
+    parser.add_argument("--findings", dest="inventory", type=Path)
     parser.add_argument("--features-lib", type=Path)
     parser.add_argument("--clean", type=Path, required=True)
     parser.add_argument("--runtime", type=Path, required=True)
@@ -183,7 +183,7 @@ def main() -> int:
         failures.extend(validate_runtime_permissions(parsed_runtime, runtime_blocks))
 
     summary_lines = [
-        "# Config Maintenance Validation",
+        "# Config Validation",
         "",
         f"- clean: `{args.clean}`",
         f"- runtime: `{args.runtime}`",

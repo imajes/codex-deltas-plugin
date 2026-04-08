@@ -1,4 +1,0 @@
-interface:
-  display_name: "Config Key Lifecycle"
-  short_description: "Classify Codex config keys by lifecycle state"
-  default_prompt: "Use $config-key-lifecycle to classify current Codex config keys before editing config files."

@@ -22,7 +22,7 @@ ALIGN_TOOL = CODEX_HOME / "bin" / "align_toml_inline_comments"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Codex config maintenance workflow.")
+    parser = argparse.ArgumentParser(description="Run the Codex delta config orchestration workflow.")
     parser.add_argument(
         "mode",
         choices=[
@@ -169,7 +169,7 @@ def write_placeholder_validation(
 ) -> None:
     summary = inventory.get("summary", {}) if isinstance(inventory, dict) else {}
     lines = [
-        "# Config Maintenance Validation",
+        "# Config Validation",
         "",
         f"- clean: `{clean}`",
         f"- runtime: `{runtime}`",
@@ -215,18 +215,20 @@ def main() -> int:
     run_dir = DELTA_DIR / current_sha[:7]
     run_dir.mkdir(parents=True, exist_ok=True)
     compare_short = compare_sha[:7] if compare_sha else "current"
-    inventory_path = run_dir / f"config-key-inventory-{compare_short}.json"
+    inventory_path = run_dir / f"config-findings-{compare_short}.json"
     clean_output_name = "config-CLEAN-alpha-sorted.toml" if args.mode == "alpha-sort-only" else "config-CLEAN-synced.toml"
     clean_output = run_dir / clean_output_name
     runtime_output = run_dir / "proposed-config.toml"
     validation_output = run_dir / ("validation-layout.md" if args.mode == "alpha-sort-only" else "validation.md")
     baseline_diff = run_dir / ("config-CLEAN-alpha-sort.diff" if args.mode == "alpha-sort-only" else "baseline-vs-runtime.diff")
     proposed_diff = run_dir / ("runtime-proposal.diff" if args.mode == "alpha-sort-only" else "proposed-patch.diff")
-    summary_output = run_dir / ("alpha-sort-summary.md" if args.mode == "alpha-sort-only" else "config-maintenance-summary.md")
+    summary_output = run_dir / (
+        "layout-summary.md" if args.mode == "alpha-sort-only" else "config-orchestration-summary.md"
+    )
 
-    classify = script_path("config-key-lifecycle", "scripts/classify_config_keys.py")
-    sync = script_path("config-file-sync", "scripts/sync_config_files.py")
-    validate = script_path("config-validate", "scripts/validate_config_sync.py")
+    classify = script_path("analyze-config", "scripts/classify_config_keys.py")
+    sync = script_path("synthesize-config", "scripts/sync_config_files.py")
+    validate = script_path("validate-config", "scripts/validate_config_sync.py")
     features_lib = args.repo / "codex-rs" / "features" / "src" / "lib.rs"
     legacy_features = args.repo / "codex-rs" / "features" / "src" / "legacy.rs"
     schema = args.repo / "codex-rs" / "core" / "config.schema.json"
@@ -301,11 +303,11 @@ def main() -> int:
             except Exception as exc:
                 workflow_failed = True
                 failure_stage = "classify"
-                failure_message = f"failed to parse inventory output: {exc}"
+                failure_message = f"failed to parse config findings output: {exc}"
             else:
                 sync_cmd.extend(
                     [
-                        "--inventory",
+                        "--findings",
                         str(inventory_path),
                         "--features-lib",
                         str(features_lib),
@@ -315,7 +317,7 @@ def main() -> int:
                 )
                 validate_cmd.extend(
                     [
-                        "--inventory",
+                        "--findings",
                         str(inventory_path),
                         "--features-lib",
                         str(features_lib),
@@ -395,7 +397,7 @@ def main() -> int:
     validation_exit_code = validation_result.returncode if validation_result is not None else 1
 
     summary_lines = [
-        "# Config Maintenance Summary",
+        "# Config Orchestration Summary",
         "",
         f"- mode: `{args.mode}`",
         f"- repo: `{args.repo}`",
@@ -405,7 +407,7 @@ def main() -> int:
         f"- mirror: `{args.mirror}`",
         f"- artifact_dir: `{run_dir}`",
         f"- classification summary: `new: {inventory['summary'].get('new', 0)}, pre-schema: {inventory['summary'].get('pre-schema', 0)}, legacy: {inventory['summary'].get('legacy', 0)}, removed: {inventory['summary'].get('removed', 0)}`",
-        f"- inventory: `{inventory_path if args.mode != 'alpha-sort-only' else 'not generated'}`",
+        f"- config findings: `{inventory_path if args.mode != 'alpha-sort-only' else 'not generated'}`",
         f"- synchronized clean artifact: `{clean_output}`",
         f"- canonical clean synced: `{'yes' if validation_result is not None and validation_result.returncode == 0 and args.mode != 'alpha-sort-only' else 'no'}`",
         f"- proposed runtime artifact: `{runtime_output}`",

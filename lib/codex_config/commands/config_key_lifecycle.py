@@ -248,7 +248,7 @@ def main() -> int:
             codex_home()
             / "config"
             / "deltas"
-            / "config-key-inventory.json"
+            / "config-findings.json"
         )
     dump_json(output, payload)
     print(output)

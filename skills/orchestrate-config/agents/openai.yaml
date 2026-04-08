@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orchestrate Config"
+  short_description: "Run the config subworkflow for Codex delta runs"
+  default_prompt: "Use $orchestrate-config to coordinate config analysis, synthesis, and validation for a Codex delta run."

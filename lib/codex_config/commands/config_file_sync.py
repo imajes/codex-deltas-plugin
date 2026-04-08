@@ -42,8 +42,8 @@ class PreservedRuntimeBlocks:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Sync Codex config files from inventory.")
-    parser.add_argument("--inventory", type=Path)
+    parser = argparse.ArgumentParser(description="Synthesize Codex config artifacts from config findings.")
+    parser.add_argument("--findings", dest="inventory", type=Path)
     parser.add_argument("--features-lib", type=Path)
     parser.add_argument("--legacy-features", type=Path)
     parser.add_argument("--config-clean", type=Path, required=True)
@@ -429,7 +429,7 @@ def main() -> int:
         return 0
 
     if args.inventory is None or args.features_lib is None or args.legacy_features is None:
-        raise SystemExit("--inventory, --features-lib, and --legacy-features are required unless --layout-only is set")
+        raise SystemExit("--findings, --features-lib, and --legacy-features are required unless --layout-only is set")
 
     inventory = load_json(args.inventory)
     inventory_entries = inventory["entries"]

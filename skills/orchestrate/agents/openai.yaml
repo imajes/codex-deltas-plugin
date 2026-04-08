@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orchestrate"
+  short_description: "Run the full Codex delta workflow"
+  default_prompt: "Use $orchestrate to coordinate the full Codex delta workflow across the range, repo, config, report, and state lanes."

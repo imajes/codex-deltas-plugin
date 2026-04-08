@@ -1,0 +1,4 @@
+interface:
+  display_name: "Discover Range"
+  short_description: "Refresh the mirror and persist the next run context"
+  default_prompt: "Use $discover-range to refresh the mirror, derive the next Codex delta range, and write run-context.json."

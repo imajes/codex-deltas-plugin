@@ -1,4 +1,0 @@
-interface:
-  display_name: "Config Validate"
-  short_description: "Validate generated Codex config artifacts"
-  default_prompt: "Use $config-validate to check generated Codex config artifacts before syncing or reporting them."

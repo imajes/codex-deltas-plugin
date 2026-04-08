@@ -1,0 +1,4 @@
+interface:
+  display_name: "Update State"
+  short_description: "Write the compact automation memory for a Codex delta run"
+  default_prompt: "Use $update-state to write the compact automation memory after a Codex delta run."

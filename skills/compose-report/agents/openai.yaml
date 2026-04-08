@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compose Report"
+  short_description: "Write the final Codex delta report from persisted artifacts"
+  default_prompt: "Use $compose-report to turn repo findings and config artifacts into the final Codex delta report."

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -15,10 +16,13 @@ if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
 
 from codex_config import shared
+from codex_config.commands import analyze_repo
 from codex_config.commands import config_file_sync as sync_config_files
 from codex_config.commands import config_key_lifecycle as classify_config_keys
 from codex_config.commands import config_maintenance as run_config_maintenance
 from codex_config.commands import config_validate as validate_config_sync
+from codex_config.commands import discover_range
+from codex_config.commands import update_state
 
 
 def test_runtime_doc_with_tomlkit_migrates_permissions_and_removes_keys() -> None:
@@ -405,7 +409,7 @@ def test_run_config_maintenance_writes_summary_artifacts_on_classify_failure(
 
     run_dir = delta_dir / "abcdef1"
     validation_output = run_dir / "validation.md"
-    summary_output = run_dir / "config-maintenance-summary.md"
+    summary_output = run_dir / "config-orchestration-summary.md"
 
     assert exit_code == 1
     assert validation_output.exists()
@@ -537,3 +541,136 @@ def test_prepare_changelog_artifacts_uses_materialized_mirror_truth(
     assert classify_command[classify_command.index("--schema") + 1] == str(schema_path)
     assert classify_command[classify_command.index("--features-lib") + 1] == str(features_path)
     assert classify_command[classify_command.index("--legacy-features") + 1] == str(legacy_path)
+
+
+def test_discover_range_builds_run_context_from_memory_and_mirror(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    memory_path = tmp_path / "memory.md"
+    mirror = tmp_path / "mirror.git"
+    artifact_root = tmp_path / "deltas"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    memory_path.write_text(
+        "\n".join(
+            [
+                "# codex-git-changelog memory",
+                "",
+                "- last_reported_origin_main_sha: 1234567890abcdef1234567890abcdef12345678",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        discover_range,
+        "ensure_mirror",
+        lambda path, repo_url: "abcdef1234567890abcdef1234567890abcdef12",
+    )
+    monkeypatch.setattr(discover_range, "run_stdout", lambda command: "7")
+
+    context, output = discover_range.build_run_context(
+        argparse.Namespace(
+            memory=memory_path,
+            mirror=mirror,
+            repo=repo,
+            repo_url="https://github.com/openai/codex.git",
+            artifact_root=artifact_root,
+            output=None,
+        )
+    )
+
+    assert output == artifact_root / "abcdef1" / "run-context.json"
+    assert context["from_sha"] == "1234567890abcdef1234567890abcdef12345678"
+    assert context["to_sha"] == "abcdef1234567890abcdef1234567890abcdef12"
+    assert context["range"] == (
+        "1234567890abcdef1234567890abcdef12345678.."
+        "abcdef1234567890abcdef1234567890abcdef12"
+    )
+    assert context["commit_count"] == 7
+    assert context["config_findings_path"] == str(
+        artifact_root / "abcdef1" / "config-findings-1234567.json"
+    )
+
+
+def test_analyze_repo_builds_findings_from_run_context(monkeypatch) -> None:
+    context = {
+        "mirror_path": "/tmp/mirror.git",
+        "from_sha": "1111111111111111111111111111111111111111",
+        "to_sha": "2222222222222222222222222222222222222222",
+        "range": "1111111111111111111111111111111111111111..2222222222222222222222222222222222222222",
+        "commit_count": 2,
+    }
+
+    def fake_run_stdout(command: list[str]) -> str:
+        if "--format=%H%x1f%an%x1f%ad%x1f%s%x1f%b%x1e" in command:
+            return (
+                "aaaa1111\x1fAlice\x1f2026-04-07\x1fFirst subject\x1fBody line\x1e"
+                "bbbb2222\x1fBob\x1f2026-04-08\x1fSecond subject\x1f\x1e"
+            )
+        if "--name-status" in command:
+            return "M\tcodex-rs/core/config.rs\nR100\told.txt\tnew.txt\n"
+        if "--numstat" in command:
+            return "4\t1\tcodex-rs/core/config.rs\n0\t0\tnew.txt\n"
+        raise AssertionError(command)
+
+    monkeypatch.setattr(analyze_repo, "run_stdout", fake_run_stdout)
+
+    findings = analyze_repo.build_repo_findings(context)
+
+    assert findings["commit_count"] == 2
+    assert findings["commits"][0]["subject"] == "First subject"
+    assert findings["changed_files"][1]["previous_path"] == "old.txt"
+    assert findings["file_stats"]["codex-rs/core/config.rs"] == {"added": 4, "deleted": 1}
+
+
+def test_update_state_writes_state_update_and_compact_memory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    memory_path = tmp_path / "memory.md"
+    run_context = tmp_path / "run-context.json"
+    state_update_path = tmp_path / "state-update.json"
+    run_context.write_text(
+        json.dumps(
+            {
+                "repo_url": "https://github.com/openai/codex.git",
+                "mirror_path": "/tmp/mirror.git",
+                "memory_path": str(memory_path),
+                "state_update_path": str(state_update_path),
+                "to_sha": "abcdef1234567890abcdef1234567890abcdef12",
+                "range": "111..222",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        update_state,
+        "parse_args",
+        lambda: argparse.Namespace(
+            run_context=run_context,
+            memory=None,
+            mode="success",
+            status_note="fresh report written",
+            learnings="range handled through plugin lanes",
+            corrections=None,
+            feedback="report looked good",
+            apply=True,
+        ),
+    )
+
+    exit_code = update_state.main()
+
+    assert exit_code == 0
+    assert state_update_path.exists()
+    state_payload = json.loads(state_update_path.read_text(encoding="utf-8"))
+    assert (
+        state_payload["fields"]["last_reported_origin_main_sha"]
+        == "abcdef1234567890abcdef1234567890abcdef12"
+    )
+    memory_text = memory_path.read_text(encoding="utf-8")
+    assert "- status_note: fresh report written" in memory_text
+    assert "- feedback: report looked good" in memory_text

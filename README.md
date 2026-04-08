@@ -1,30 +1,30 @@
-# codex-config-deltas
+# codex-deltas
 
-Local source-of-truth repo for the Codex config maintenance toolchain.
+Local source-of-truth repo for the Codex delta workflow plugin.
 
-This code now lives as the `config-deltas` local plugin under `plugins/config-deltas`.
-The old `src/config-deltas` path is preserved as a compatibility symlink so existing
-absolute references continue to resolve while the plugin path becomes canonical.
+This code lives as the `codex-deltas` local plugin.
 
 This repo owns:
 - `lib/codex_config/`
-- `skills/config-key-lifecycle/`
-- `skills/config-file-sync/`
-- `skills/config-validate/`
-- `skills/config-maintenance/`
-- `skills/codex-git-changelog/`
+- `skills/orchestrate/`
+- `skills/discover-range/`
+- `skills/analyze-repo/`
+- `skills/orchestrate-config/`
+- `skills/analyze-config/`
+- `skills/synthesize-config/`
+- `skills/validate-config/`
+- `skills/compose-report/`
+- `skills/update-state/`
 - `automations/codex-git-changelog/`
-
-The live Codex skill entrypoints under `~/.codex` should point back here via symlinks.
-Codex plugin discovery is registered through `.agents/plugins/marketplace.json`.
 
 ## Automation surfaces
 
 The changelog automation stack for this plugin is split deliberately:
 
-- `skills/config-maintenance/` owns classify, sync, validate, and config diff artifacts.
-- `skills/codex-git-changelog/` owns mirror-backed range handling, final report composition, and automation-memory updates.
-- `automations/codex-git-changelog/automation.toml` should stay thin and point the agent at the plugin plus the operating directories.
+- `skills/orchestrate/` owns top-level lane ordering and resume behavior.
+- `skills/orchestrate-config/` owns the config-only subworkflow.
+- Leaf lane skills own range discovery, repo analysis, config analysis, config synthesis, config validation, report composition, and state updates.
+- `automations/codex-git-changelog/automation.toml` stays thin and points the agent at the plugin plus the operating directories.
 
 For changelog runs, the canonical folders are:
 
@@ -37,14 +37,14 @@ For changelog runs, the canonical folders are:
 ## Runtime
 
 Use `uv` for dependency management and script execution.
-Use `uv run <project-script>` as the stable CLI surface for script entrypoints.
+Use `uv run <project-script>` as the helper-command surface for lane entrypoints.
 
 Examples:
 
 ```bash
 uv sync
-uv run config-maintenance --help
-uv run config-maintenance prepare-changelog-artifacts --help
+uv run codex-delta-discover-range --help
+uv run codex-delta-orchestrate-config --help
 uv run --group dev pytest -q
 just sync-codex-git-changelog-automation
 ```

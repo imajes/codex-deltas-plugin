@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codex-config-deltas"
+name = "codex-deltas"
 version = "0.1.0"
-description = "Codex config maintenance skills and supporting tooling"
+description = "Codex delta workflow skills and supporting tooling"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -13,10 +13,13 @@ dependencies = [
 ]
 
 [project.scripts]
-config-maintenance = "codex_config.commands.config_maintenance:main"
-config-key-lifecycle = "codex_config.commands.config_key_lifecycle:main"
-config-file-sync = "codex_config.commands.config_file_sync:main"
-config-validate = "codex_config.commands.config_validate:main"
+codex-delta-discover-range = "codex_config.commands.discover_range:main"
+codex-delta-analyze-repo = "codex_config.commands.analyze_repo:main"
+codex-delta-analyze-config = "codex_config.commands.analyze_config:main"
+codex-delta-synthesize-config = "codex_config.commands.synthesize_config:main"
+codex-delta-validate-config = "codex_config.commands.validate_config:main"
+codex-delta-orchestrate-config = "codex_config.commands.orchestrate_config:main"
+codex-delta-update-state = "codex_config.commands.update_state:main"
 
 [dependency-groups]
 dev = [
