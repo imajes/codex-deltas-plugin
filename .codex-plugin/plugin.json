@@ -1,21 +1,34 @@
 {
   "name": "codex-deltas",
+  "version": "0.1.0",
   "description": "Codex delta workflow skills, helper commands, and automation bundled as a single local plugin.",
-  "skills": "./skills",
+  "author": {
+    "name": "@imajes",
+    "email": "james@imaj.es",
+    "url": "https://github.com/imajes"
+  },
+  "homepage":   "https://github.com/imajes/codex-skills",
+  "repository": "https://github.com/imajes/codex-skills",
+  "license": "MIT",
+  "keywords": ["codex", "deltas", "changelog", "config", "automation"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "apps": "./.app.json",
   "interface": {
     "displayName": "Codex Deltas",
     "shortDescription": "Codex delta discovery, config regeneration, and reporting.",
     "longDescription": "Bundles lane-oriented Codex delta orchestration, repo and config analysis, config synthesis, validation, reporting, and automation state updates into one local plugin.",
-    "developerName": "James",
+    "developerName": "@imajes",
     "category": "Developer Tools",
-    "capabilities": [
-      "Automation",
-      "Write"
-    ],
+    "capabilities": ["Interactive", "Automation", "Read", "Write"],
     "defaultPrompt": [
       "Run the Codex delta orchestration workflow and summarize what changed.",
       "Analyze Codex config deltas and regenerate the config artifacts.",
       "Compose the Codex delta report from persisted repo and config findings."
-    ]
+    ],
+    "brandColor": "#0F766E",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "screenshots": ["./assets/screenshot-1.png"]
   }
 }
