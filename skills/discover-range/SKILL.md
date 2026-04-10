@@ -16,14 +16,15 @@ Discover the next Codex delta range and persist the run context for downstream l
 ## Workflow
 
 1. Read the compact automation memory from `$CODEX_HOME/automations/codex-git-changelog/memory.md`.
-2. Use only the bare mirror at `$CODEX_HOME/automations/codex-git-changelog/repos/openai-codex.git` for range truth.
+2. Use only the bare mirror at `/tmp/codex-git-changelog/openai-codex.git` for range truth.
 3. Run:
 
 ```bash
 uv run codex-delta-discover-range
 ```
 
-4. Treat the emitted `run-context.json` as the canonical handoff for downstream lanes.
+4. If automation memory does not already contain `last_reported_origin_main_sha`, rerun with `--from-sha <sha>`.
+5. Treat the emitted `run-context.json` as the canonical handoff for downstream lanes.
 
 ## Output
 

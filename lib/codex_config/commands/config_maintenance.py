@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SKILLS_DIR = REPO_ROOT / "skills"
 DELTA_DIR = CODEX_HOME / "config" / "deltas"
 AUTOMATION_DIR = CODEX_HOME / "automations" / "codex-git-changelog"
-MIRROR_PATH = AUTOMATION_DIR / "repos" / "openai-codex.git"
+MIRROR_PATH = Path("/tmp") / "codex-git-changelog" / "openai-codex.git"
 REMOTE_URL = "https://github.com/openai/codex.git"
 ALIGN_TOOL = CODEX_HOME / "bin" / "align_toml_inline_comments"
 
@@ -35,7 +35,6 @@ def parse_args() -> argparse.Namespace:
         default="sync-current",
         nargs="?",
     )
-    parser.add_argument("--repo", type=Path, default=Path("/Users/james/src/artificial_intelligence/codex"))
     parser.add_argument("--mirror", type=Path, default=MIRROR_PATH)
     parser.add_argument("--from-sha")
     parser.add_argument("--config-clean", type=Path, default=CODEX_HOME / "config" / "config-CLEAN.toml")
@@ -206,11 +205,13 @@ def main() -> int:
     DELTA_DIR.mkdir(parents=True, exist_ok=True)
 
     compare_sha = args.from_sha
-    repo_for_history = args.repo
-    current_sha = run_stdout(["git", "-C", str(args.repo), "rev-parse", "HEAD"])
-    if args.mode == "prepare-changelog-artifacts":
-        current_sha = ensure_mirror(args.mirror)
-        repo_for_history = args.mirror
+    current_sha = ensure_mirror(args.mirror)
+    repo_for_history = args.mirror
+    if args.mode != "alpha-sort-only" and not compare_sha:
+        raise RuntimeError(
+            f"{args.mode} requires `--from-sha` so the workflow always has an explicit "
+            "from/to changeset."
+        )
 
     run_dir = DELTA_DIR / current_sha[:7]
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -229,10 +230,8 @@ def main() -> int:
     classify = script_path("analyze-config", "scripts/classify_config_keys.py")
     sync = script_path("synthesize-config", "scripts/sync_config_files.py")
     validate = script_path("validate-config", "scripts/validate_config_sync.py")
-    features_lib = args.repo / "codex-rs" / "features" / "src" / "lib.rs"
-    legacy_features = args.repo / "codex-rs" / "features" / "src" / "legacy.rs"
-    schema = args.repo / "codex-rs" / "core" / "config.schema.json"
-    if args.mode == "prepare-changelog-artifacts":
+    truth_sources = None
+    if args.mode != "alpha-sort-only":
         truth_sources = materialize_truth_sources(run_dir, args.mirror, current_sha)
         features_lib = truth_sources["features_lib"]
         legacy_features = truth_sources["legacy_features"]
@@ -290,8 +289,7 @@ def main() -> int:
         ]
         if compare_sha:
             classify_cmd.extend(["--from-sha", compare_sha])
-        if args.mode == "prepare-changelog-artifacts":
-            classify_cmd.append("--git-dir")
+        classify_cmd.append("--git-dir")
         classify_result = run_stage(stage_results, "classify", classify_cmd)
         if classify_result.returncode != 0:
             workflow_failed = True
@@ -400,7 +398,6 @@ def main() -> int:
         "# Config Orchestration Summary",
         "",
         f"- mode: `{args.mode}`",
-        f"- repo: `{args.repo}`",
         f"- repo_for_history: `{repo_for_history}`",
         f"- current_sha: `{current_sha}`",
         f"- compare_sha: `{compare_sha or 'none'}`",

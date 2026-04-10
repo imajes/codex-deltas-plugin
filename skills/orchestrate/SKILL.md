@@ -21,9 +21,8 @@ Run the full Codex delta workflow. This is the top-level plugin skill for automa
 
 ## Operating paths
 
-- plugin root: current plugin checkout (`.`)
 - automation state: `$CODEX_HOME/automations/codex-git-changelog`
-- codex repo checkout: `/Users/james/src/artificial_intelligence/codex`
+- mirror: `/tmp/codex-git-changelog/openai-codex.git`
 - artifact root: `$CODEX_HOME/config/deltas/<to_short_sha>/`
 
 ## Workflow
@@ -61,7 +60,7 @@ Required details:
 - include classification summary exactly as `new: N, pre-schema: N, legacy: N, removed: N`
 - clearly distinguish the baseline/runtime visibility diff from the actionable proposed runtime patch diff
 - print the full Markdown report in the conversation
-- save the same substance under `$CODEX_HOME/config/deltas/<to_short_sha>/repo-delta-<from_or_init>.md`
+- save the same substance under `$CODEX_HOME/config/deltas/<to_short_sha>/repo-delta-<from_short_sha>.md`
 
 ## Reporting rules
 

@@ -1,8 +1,9 @@
 # Orchestrate Rules
 
 - Read automation memory first from `~/.codex/automations/codex-git-changelog/memory.md`.
-- Use only the bare HTTPS mirror under `~/.codex/automations/codex-git-changelog/repos/openai-codex.git` for repository history, commit ranges, and destination SHA selection.
+- Use only the bare mirror under `/tmp/codex-git-changelog/openai-codex.git` for repository history, commit ranges, and destination SHA selection.
 - Determine `from` from memory field `last_reported_origin_main_sha`.
+- If memory does not contain `last_reported_origin_main_sha`, stop and require an explicit `--from-sha` seed rather than inventing an init range.
 - Update the mirror before determining `to`. If mirror update fails, stop immediately and produce a failure-only report.
 - Prefer persisted lane handoffs over recomputing earlier stages.
 - Treat `[$codex-deltas:orchestrate-config](../orchestrate-config/SKILL.md)` as the config subworkflow.
@@ -31,7 +32,7 @@
   - include classification summary exactly as `new: N, pre-schema: N, legacy: N, removed: N`
   - clearly distinguish visibility diff versus actionable proposed patch diff
   - print the full Markdown report in the conversation
-  - save the same substance to `~/.codex/config/deltas/<to_short_sha>/repo-delta-<from_or_init>.md`
+  - save the same substance to `~/.codex/config/deltas/<to_short_sha>/repo-delta-<from_short_sha>.md`
 - On full success, compact automation memory to:
   - `repo_url`
   - `mirror_path`

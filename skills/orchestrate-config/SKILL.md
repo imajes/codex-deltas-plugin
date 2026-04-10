@@ -21,11 +21,9 @@ Run the config-only subworkflow. This skill coordinates the config lanes but doe
 
 ## Operating paths
 
-- plugin root: current plugin checkout (`.`)
 - composite command: `codex-delta-orchestrate-config`
-- default repo checkout: `/Users/james/src/artificial_intelligence/codex`
 - automation state: `$CODEX_HOME/automations/codex-git-changelog`
-- default bare mirror: `$CODEX_HOME/automations/codex-git-changelog/repos/openai-codex.git`
+- default bare mirror: `/tmp/codex-git-changelog/openai-codex.git`
 - canonical clean config: `$CODEX_HOME/config/config-CLEAN.toml`
 - live runtime config: `$CODEX_HOME/config/config.toml`
 - artifact root: `$CODEX_HOME/config/deltas/<to_short_sha>/`
@@ -40,7 +38,7 @@ Run the config-only subworkflow. This skill coordinates the config lanes but doe
 ## Modes
 
 - `alpha-sort-only`: layout cleanup only; do not classify or add/remove keys.
-- `sync-current`: classify and sync against the current checkout.
+- `sync-current`: classify and sync against mirror `main` at the current destination ref.
 - `prepare-changelog-artifacts`: classify and sync for changelog automation using mirror-backed current truth at the destination ref.
 - `touch-features` and `repair-runtime`: maintenance helper modes exposed by the runner; use only when the task explicitly calls for them.
 
@@ -48,7 +46,8 @@ Run the config-only subworkflow. This skill coordinates the config lanes but doe
 
 - Use lane skills when you want a targeted rerun.
 - Use the composite command when you intentionally want the entire config subworkflow in one shot.
-- In `prepare-changelog-artifacts` mode, repository history and truth sources come from the bare mirror, not workspace git state.
+- Repository history and current truth sources come from the bare mirror, not workspace git state.
+- Full-sync modes require `--from-sha` so the workflow always has an explicit `from..to` comparison.
 - Write outputs only under `$CODEX_HOME/config/deltas/<short_sha>/`.
 - Update the canonical `config-CLEAN.toml` only after validation passes.
 - Never overwrite the live `config.toml`; emit `proposed-config.toml` and `proposed-patch.diff` instead.
@@ -70,8 +69,7 @@ Prepare changelog artifacts with the normal repo-local invocation:
 
 ```bash
 uv run codex-delta-orchestrate-config prepare-changelog-artifacts \
-  --repo /Users/james/src/artificial_intelligence/codex \
-  --mirror "$CODEX_HOME/automations/codex-git-changelog/repos/openai-codex.git" \
+  --mirror /tmp/codex-git-changelog/openai-codex.git \
   --from-sha <from_sha>
 ```
 

@@ -12,10 +12,9 @@ from codex_config.automation_state import read_markdown_memory
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
 DELTA_DIR = CODEX_HOME / "config" / "deltas"
 AUTOMATION_DIR = CODEX_HOME / "automations" / "codex-git-changelog"
-MIRROR_PATH = AUTOMATION_DIR / "repos" / "openai-codex.git"
+MIRROR_PATH = Path("/tmp") / "codex-git-changelog" / "openai-codex.git"
 MEMORY_PATH = AUTOMATION_DIR / "memory.md"
 REMOTE_URL = "https://github.com/openai/codex.git"
-DEFAULT_REPO = Path("/Users/james/src/artificial_intelligence/codex")
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--memory", type=Path, default=MEMORY_PATH)
     parser.add_argument("--mirror", type=Path, default=MIRROR_PATH)
-    parser.add_argument("--repo", type=Path, default=DEFAULT_REPO)
+    parser.add_argument("--from-sha")
     parser.add_argument("--repo-url", default=REMOTE_URL)
     parser.add_argument("--artifact-root", type=Path, default=DELTA_DIR)
     parser.add_argument("--output", type=Path)
@@ -53,27 +52,26 @@ def ensure_mirror(path: Path, repo_url: str) -> str:
 
 def build_run_context(args: argparse.Namespace) -> tuple[dict[str, object], Path]:
     memory = read_markdown_memory(args.memory)
-    from_sha = memory.get("last_reported_origin_main_sha") or None
+    from_sha = args.from_sha or memory.get("last_reported_origin_main_sha") or None
+    if not from_sha:
+        raise RuntimeError(
+            "discover-range requires a baseline SHA; seed automation memory with "
+            "`last_reported_origin_main_sha` or pass `--from-sha`."
+        )
     to_sha = ensure_mirror(args.mirror, args.repo_url)
-    compare_label = from_sha[:7] if from_sha else "init"
+    compare_label = from_sha[:7]
     run_dir = args.artifact_root / to_sha[:7]
     run_dir.mkdir(parents=True, exist_ok=True)
     output = args.output or run_dir / "run-context.json"
-
-    if from_sha:
-        commit_count = int(
-            run_stdout(
-                ["git", f"--git-dir={args.mirror}", "rev-list", "--count", f"{from_sha}..{to_sha}"]
-            )
+    commit_count = int(
+        run_stdout(
+            ["git", f"--git-dir={args.mirror}", "rev-list", "--count", f"{from_sha}..{to_sha}"]
         )
-        range_expr = f"{from_sha}..{to_sha}"
-    else:
-        commit_count = None
-        range_expr = None
+    )
+    range_expr = f"{from_sha}..{to_sha}"
 
     context = {
         "repo_url": args.repo_url,
-        "repo_checkout": str(args.repo),
         "mirror_path": str(args.mirror),
         "memory_path": str(args.memory),
         "artifact_root": str(args.artifact_root),
@@ -84,7 +82,7 @@ def build_run_context(args: argparse.Namespace) -> tuple[dict[str, object], Path
         "compare_label": compare_label,
         "range": range_expr,
         "commit_count": commit_count,
-        "range_empty": commit_count == 0 if commit_count is not None else False,
+        "range_empty": commit_count == 0,
         "report_path": str(run_dir / f"repo-delta-{compare_label}.md"),
         "config_findings_path": str(run_dir / f"config-findings-{compare_label}.json"),
         "config_summary_path": str(run_dir / "config-orchestration-summary.md"),

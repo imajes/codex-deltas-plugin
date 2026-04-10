@@ -366,8 +366,6 @@ def test_run_config_maintenance_writes_summary_artifacts_on_classify_failure(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
     clean = tmp_path / "config-CLEAN.toml"
     runtime = tmp_path / "config.toml"
     clean.write_text("[features]\nfeature_a = true\n", encoding="utf-8")
@@ -388,14 +386,25 @@ def test_run_config_maintenance_writes_summary_artifacts_on_classify_failure(
         "parse_args",
         lambda: argparse.Namespace(
             mode="sync-current",
-            repo=repo,
             mirror=mirror,
-            from_sha=None,
+            from_sha="1234567890abcdef",
             config_clean=clean,
             config_runtime=runtime,
         ),
     )
-    monkeypatch.setattr(run_config_maintenance, "run_stdout", lambda command: "abcdef1234567890")
+    monkeypatch.setattr(run_config_maintenance, "ensure_mirror", lambda path: "abcdef1234567890")
+    monkeypatch.setattr(
+        run_config_maintenance,
+        "materialize_truth_sources",
+        lambda run_dir, git_dir, ref: {
+            "schema": tmp_path / "config.schema.json",
+            "features_lib": tmp_path / "lib.rs",
+            "legacy_features": tmp_path / "legacy.rs",
+        },
+    )
+    (tmp_path / "config.schema.json").write_text('{"type":"object"}', encoding="utf-8")
+    (tmp_path / "lib.rs").write_text("features", encoding="utf-8")
+    (tmp_path / "legacy.rs").write_text("legacy", encoding="utf-8")
 
     def fake_run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
         command_text = " ".join(command)
@@ -453,8 +462,6 @@ def test_prepare_changelog_artifacts_uses_materialized_mirror_truth(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    repo = tmp_path / "stale-repo"
-    repo.mkdir()
     mirror = tmp_path / "mirror.git"
     clean = tmp_path / "config-CLEAN.toml"
     runtime = tmp_path / "config.toml"
@@ -483,7 +490,6 @@ def test_prepare_changelog_artifacts_uses_materialized_mirror_truth(
         "parse_args",
         lambda: argparse.Namespace(
             mode="prepare-changelog-artifacts",
-            repo=repo,
             mirror=mirror,
             from_sha="1234567890abcdef",
             config_clean=clean,
@@ -550,8 +556,6 @@ def test_discover_range_builds_run_context_from_memory_and_mirror(
     memory_path = tmp_path / "memory.md"
     mirror = tmp_path / "mirror.git"
     artifact_root = tmp_path / "deltas"
-    repo = tmp_path / "repo"
-    repo.mkdir()
     memory_path.write_text(
         "\n".join(
             [
@@ -575,7 +579,7 @@ def test_discover_range_builds_run_context_from_memory_and_mirror(
         argparse.Namespace(
             memory=memory_path,
             mirror=mirror,
-            repo=repo,
+            from_sha=None,
             repo_url="https://github.com/openai/codex.git",
             artifact_root=artifact_root,
             output=None,
@@ -593,6 +597,38 @@ def test_discover_range_builds_run_context_from_memory_and_mirror(
     assert context["config_findings_path"] == str(
         artifact_root / "abcdef1" / "config-findings-1234567.json"
     )
+
+
+def test_discover_range_requires_explicit_baseline_when_memory_is_empty(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    memory_path = tmp_path / "memory.md"
+    mirror = tmp_path / "mirror.git"
+    artifact_root = tmp_path / "deltas"
+    memory_path.write_text("# codex-git-changelog memory\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        discover_range,
+        "ensure_mirror",
+        lambda path, repo_url: "abcdef1234567890abcdef1234567890abcdef12",
+    )
+
+    try:
+        discover_range.build_run_context(
+            argparse.Namespace(
+                memory=memory_path,
+                mirror=mirror,
+                from_sha=None,
+                repo_url="https://github.com/openai/codex.git",
+                artifact_root=artifact_root,
+                output=None,
+            )
+        )
+    except RuntimeError as exc:
+        assert "requires a baseline SHA" in str(exc)
+    else:
+        raise AssertionError("expected discover_range.build_run_context to require a baseline SHA")
 
 
 def test_analyze_repo_builds_findings_from_run_context(monkeypatch) -> None:

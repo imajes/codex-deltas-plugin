@@ -24,15 +24,16 @@ The changelog automation stack for this plugin is split deliberately:
 - `skills/orchestrate/` owns top-level lane ordering and resume behavior.
 - `skills/orchestrate-config/` owns the config-only subworkflow.
 - Leaf lane skills own range discovery, repo analysis, config analysis, config synthesis, config validation, report composition, and state updates.
-- `automations/codex-git-changelog/automation.toml` stays thin and points the agent at the plugin plus the operating directories.
+- `automations/codex-git-changelog/automation.toml` stays thin and points the agent at the top-level orchestration skill.
 
 For changelog runs, the canonical folders are:
 
-- plugin root: current plugin checkout (`.`)
-- codex repo checkout: `/Users/james/src/artificial_intelligence/codex`
 - automation state: `$CODEX_HOME/automations/codex-git-changelog`
-- mirror: `$CODEX_HOME/automations/codex-git-changelog/repos/openai-codex.git`
+- mirror: `/tmp/codex-git-changelog/openai-codex.git`
 - artifact root: `$CODEX_HOME/config/deltas`
+
+The workflow is mirror-only. It no longer reads current truth from a mutable working checkout.
+Seed the baseline from automation memory or pass an explicit `--from-sha`; report runs always operate on a concrete `from..to` range.
 
 ## Runtime
 
