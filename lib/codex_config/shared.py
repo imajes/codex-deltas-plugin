@@ -128,6 +128,23 @@ def codex_home() -> Path:
     return Path.home() / ".codex"
 
 
+def automation_root() -> Path | None:
+    for key in ("CODEX_DELTAS_AUTOMATION_ROOT", "CODEX_AUTOMATION_ROOT"):
+        value = os.environ.get(key)
+        if value:
+            return Path(value).expanduser()
+    return None
+
+
+def default_automation_memory_path(root: Path) -> Path:
+    return root / "memory.md"
+
+
+def default_automation_mirror_path(root: Path, repo_name: str = "openai-codex.git") -> Path:
+    automation_name = root.name or "codex-automation"
+    return Path("/tmp") / automation_name / repo_name
+
+
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 

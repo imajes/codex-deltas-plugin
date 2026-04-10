@@ -10,13 +10,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from codex_config.shared import automation_root
+from codex_config.shared import default_automation_mirror_path
+
 
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SKILLS_DIR = REPO_ROOT / "skills"
 DELTA_DIR = CODEX_HOME / "config" / "deltas"
-AUTOMATION_DIR = CODEX_HOME / "automations" / "codex-git-changelog"
-MIRROR_PATH = Path("/tmp") / "codex-git-changelog" / "openai-codex.git"
 REMOTE_URL = "https://github.com/openai/codex.git"
 ALIGN_TOOL = CODEX_HOME / "bin" / "align_toml_inline_comments"
 
@@ -35,7 +36,8 @@ def parse_args() -> argparse.Namespace:
         default="sync-current",
         nargs="?",
     )
-    parser.add_argument("--mirror", type=Path, default=MIRROR_PATH)
+    parser.add_argument("--automation-root", type=Path)
+    parser.add_argument("--mirror", type=Path)
     parser.add_argument("--from-sha")
     parser.add_argument("--config-clean", type=Path, default=CODEX_HOME / "config" / "config-CLEAN.toml")
     parser.add_argument("--config-runtime", type=Path, default=CODEX_HOME / "config" / "config.toml")
@@ -85,6 +87,18 @@ def ensure_mirror(path: Path) -> str:
         check=True,
     )
     return run_stdout(["git", f"--git-dir={path}", "rev-parse", "refs/heads/main"])
+
+
+def resolve_mirror_path(args: argparse.Namespace) -> Path:
+    if args.mirror is not None:
+        return args.mirror
+    configured_root = args.automation_root or automation_root()
+    if configured_root is not None:
+        return default_automation_mirror_path(configured_root)
+    raise RuntimeError(
+        "config orchestration requires `--mirror` or an automation root via `--automation-root`, "
+        "`CODEX_DELTAS_AUTOMATION_ROOT`, or `CODEX_AUTOMATION_ROOT`."
+    )
 
 
 def materialize_truth_file(git_dir: Path, ref: str, relative_path: str, output_path: Path) -> Path:
@@ -203,10 +217,11 @@ def write_stage_section(lines: list[str], stage_results: list[dict[str, object]]
 def main() -> int:
     args = parse_args()
     DELTA_DIR.mkdir(parents=True, exist_ok=True)
+    mirror_path = resolve_mirror_path(args)
 
     compare_sha = args.from_sha
-    current_sha = ensure_mirror(args.mirror)
-    repo_for_history = args.mirror
+    current_sha = ensure_mirror(mirror_path)
+    repo_for_history = mirror_path
     if args.mode != "alpha-sort-only" and not compare_sha:
         raise RuntimeError(
             f"{args.mode} requires `--from-sha` so the workflow always has an explicit "
@@ -232,7 +247,7 @@ def main() -> int:
     validate = script_path("validate-config", "scripts/validate_config_sync.py")
     truth_sources = None
     if args.mode != "alpha-sort-only":
-        truth_sources = materialize_truth_sources(run_dir, args.mirror, current_sha)
+        truth_sources = materialize_truth_sources(run_dir, mirror_path, current_sha)
         features_lib = truth_sources["features_lib"]
         legacy_features = truth_sources["legacy_features"]
         schema = truth_sources["schema"]
@@ -401,7 +416,7 @@ def main() -> int:
         f"- repo_for_history: `{repo_for_history}`",
         f"- current_sha: `{current_sha}`",
         f"- compare_sha: `{compare_sha or 'none'}`",
-        f"- mirror: `{args.mirror}`",
+        f"- mirror: `{mirror_path}`",
         f"- artifact_dir: `{run_dir}`",
         f"- classification summary: `new: {inventory['summary'].get('new', 0)}, pre-schema: {inventory['summary'].get('pre-schema', 0)}, legacy: {inventory['summary'].get('legacy', 0)}, removed: {inventory['summary'].get('removed', 0)}`",
         f"- config findings: `{inventory_path if args.mode != 'alpha-sort-only' else 'not generated'}`",

@@ -372,20 +372,18 @@ def test_run_config_maintenance_writes_summary_artifacts_on_classify_failure(
     runtime.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
 
     delta_dir = tmp_path / "deltas"
-    automation_dir = tmp_path / "automations"
     skills_dir = tmp_path / "skills"
     mirror = tmp_path / "mirror.git"
 
     monkeypatch.setattr(run_config_maintenance, "DELTA_DIR", delta_dir)
-    monkeypatch.setattr(run_config_maintenance, "AUTOMATION_DIR", automation_dir)
     monkeypatch.setattr(run_config_maintenance, "SKILLS_DIR", skills_dir)
-    monkeypatch.setattr(run_config_maintenance, "MIRROR_PATH", mirror)
     monkeypatch.setattr(run_config_maintenance, "ALIGN_TOOL", tmp_path / "align_toml_inline_comments")
     monkeypatch.setattr(
         run_config_maintenance,
         "parse_args",
         lambda: argparse.Namespace(
             mode="sync-current",
+            automation_root=None,
             mirror=mirror,
             from_sha="1234567890abcdef",
             config_clean=clean,
@@ -469,7 +467,6 @@ def test_prepare_changelog_artifacts_uses_materialized_mirror_truth(
     runtime.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
 
     delta_dir = tmp_path / "deltas"
-    automation_dir = tmp_path / "automations"
     skills_dir = tmp_path / "skills"
     truth_root = tmp_path / "materialized-truth"
     truth_root.mkdir()
@@ -481,15 +478,14 @@ def test_prepare_changelog_artifacts_uses_materialized_mirror_truth(
     legacy_path.write_text("legacy", encoding="utf-8")
 
     monkeypatch.setattr(run_config_maintenance, "DELTA_DIR", delta_dir)
-    monkeypatch.setattr(run_config_maintenance, "AUTOMATION_DIR", automation_dir)
     monkeypatch.setattr(run_config_maintenance, "SKILLS_DIR", skills_dir)
-    monkeypatch.setattr(run_config_maintenance, "MIRROR_PATH", mirror)
     monkeypatch.setattr(run_config_maintenance, "ALIGN_TOOL", tmp_path / "align_toml_inline_comments")
     monkeypatch.setattr(
         run_config_maintenance,
         "parse_args",
         lambda: argparse.Namespace(
             mode="prepare-changelog-artifacts",
+            automation_root=None,
             mirror=mirror,
             from_sha="1234567890abcdef",
             config_clean=clean,
@@ -559,7 +555,7 @@ def test_discover_range_builds_run_context_from_memory_and_mirror(
     memory_path.write_text(
         "\n".join(
             [
-                "# codex-git-changelog memory",
+                "# delta-run memory",
                 "",
                 "- last_reported_origin_main_sha: 1234567890abcdef1234567890abcdef12345678",
                 "",
@@ -577,6 +573,7 @@ def test_discover_range_builds_run_context_from_memory_and_mirror(
 
     context, output = discover_range.build_run_context(
         argparse.Namespace(
+            automation_root=None,
             memory=memory_path,
             mirror=mirror,
             from_sha=None,
@@ -606,7 +603,7 @@ def test_discover_range_requires_explicit_baseline_when_memory_is_empty(
     memory_path = tmp_path / "memory.md"
     mirror = tmp_path / "mirror.git"
     artifact_root = tmp_path / "deltas"
-    memory_path.write_text("# codex-git-changelog memory\n", encoding="utf-8")
+    memory_path.write_text("# delta-run memory\n", encoding="utf-8")
 
     monkeypatch.setattr(
         discover_range,
@@ -617,6 +614,7 @@ def test_discover_range_requires_explicit_baseline_when_memory_is_empty(
     try:
         discover_range.build_run_context(
             argparse.Namespace(
+                automation_root=None,
                 memory=memory_path,
                 mirror=mirror,
                 from_sha=None,
@@ -629,6 +627,53 @@ def test_discover_range_requires_explicit_baseline_when_memory_is_empty(
         assert "requires a baseline SHA" in str(exc)
     else:
         raise AssertionError("expected discover_range.build_run_context to require a baseline SHA")
+
+
+def test_discover_range_derives_memory_and_mirror_from_automation_root_env(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    automation_root = tmp_path / "automations" / "delta-run"
+    memory_path = automation_root / "memory.md"
+    artifact_root = tmp_path / "deltas"
+    memory_path.parent.mkdir(parents=True, exist_ok=True)
+    memory_path.write_text(
+        "\n".join(
+            [
+                "# delta-run memory",
+                "",
+                "- last_reported_origin_main_sha: 1234567890abcdef1234567890abcdef12345678",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_DELTAS_AUTOMATION_ROOT", str(automation_root))
+
+    seen: dict[str, Path] = {}
+
+    def fake_ensure_mirror(path: Path, repo_url: str) -> str:
+        seen["mirror"] = path
+        return "abcdef1234567890abcdef1234567890abcdef12"
+
+    monkeypatch.setattr(discover_range, "ensure_mirror", fake_ensure_mirror)
+    monkeypatch.setattr(discover_range, "run_stdout", lambda command: "7")
+
+    context, output = discover_range.build_run_context(
+        argparse.Namespace(
+            automation_root=None,
+            memory=None,
+            mirror=None,
+            from_sha=None,
+            repo_url="https://github.com/openai/codex.git",
+            artifact_root=artifact_root,
+            output=None,
+        )
+    )
+
+    assert output == artifact_root / "abcdef1" / "run-context.json"
+    assert context["memory_path"] == str(memory_path)
+    assert seen["mirror"] == Path("/tmp") / "delta-run" / "openai-codex.git"
 
 
 def test_analyze_repo_builds_findings_from_run_context(monkeypatch) -> None:

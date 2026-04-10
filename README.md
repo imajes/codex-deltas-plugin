@@ -15,7 +15,7 @@ This repo owns:
 - `skills/validate-config/`
 - `skills/compose-report/`
 - `skills/update-state/`
-- `automations/codex-git-changelog/`
+- `automations/changelog-template/`
 
 ## Automation surfaces
 
@@ -24,16 +24,18 @@ The changelog automation stack for this plugin is split deliberately:
 - `skills/orchestrate/` owns top-level lane ordering and resume behavior.
 - `skills/orchestrate-config/` owns the config-only subworkflow.
 - Leaf lane skills own range discovery, repo analysis, config analysis, config synthesis, config validation, report composition, and state updates.
-- `automations/codex-git-changelog/automation.toml` stays thin and points the agent at the top-level orchestration skill.
+- `automations/changelog-template/automation.toml` is a prototype template for copying into a real automation root; plugin installation does not auto-register it.
 
 For changelog runs, the canonical folders are:
 
-- automation state: `$CODEX_HOME/automations/codex-git-changelog`
-- mirror: `/tmp/codex-git-changelog/openai-codex.git`
+- automation root: supplied via `CODEX_DELTAS_AUTOMATION_ROOT`, `CODEX_AUTOMATION_ROOT`, or `--automation-root`
+- memory file: `<automation_root>/memory.md`
+- default mirror: `/tmp/<automation_name>/openai-codex.git`
 - artifact root: `$CODEX_HOME/config/deltas`
 
 The workflow is mirror-only. It no longer reads current truth from a mutable working checkout.
 Seed the baseline from automation memory or pass an explicit `--from-sha`; report runs always operate on a concrete `from..to` range.
+If the automation root is unknown, pass explicit `--memory` and `--mirror` paths instead of relying on a baked-in automation name.
 
 ## Runtime
 
@@ -47,5 +49,5 @@ uv sync
 uv run codex-delta-discover-range --help
 uv run codex-delta-orchestrate-config --help
 uv run --group dev pytest -q
-just sync-codex-git-changelog-automation
+AUTOMATION_ROOT="$HOME/.codex/automations/openai-codex-src-changelog-deltas" just sync-automation-template
 ```

@@ -1,7 +1,8 @@
 # Orchestrate Rules
 
-- Read automation memory first from `~/.codex/automations/codex-git-changelog/memory.md`.
-- Use only the bare mirror under `/tmp/codex-git-changelog/openai-codex.git` for repository history, commit ranges, and destination SHA selection.
+- Resolve the automation root from `CODEX_DELTAS_AUTOMATION_ROOT`, `CODEX_AUTOMATION_ROOT`, or `--automation-root`.
+- Read automation memory first from `<automation_root>/memory.md`, unless `--memory` was provided explicitly.
+- Use only the bare mirror under `/tmp/<automation_name>/openai-codex.git` for repository history, commit ranges, and destination SHA selection, unless `--mirror` was provided explicitly.
 - Determine `from` from memory field `last_reported_origin_main_sha`.
 - If memory does not contain `last_reported_origin_main_sha`, stop and require an explicit `--from-sha` seed rather than inventing an init range.
 - Update the mirror before determining `to`. If mirror update fails, stop immediately and produce a failure-only report.

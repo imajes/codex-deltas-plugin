@@ -21,8 +21,9 @@ Run the full Codex delta workflow. This is the top-level plugin skill for automa
 
 ## Operating paths
 
-- automation state: `$CODEX_HOME/automations/codex-git-changelog`
-- mirror: `/tmp/codex-git-changelog/openai-codex.git`
+- automation root: supplied via `CODEX_DELTAS_AUTOMATION_ROOT`, `CODEX_AUTOMATION_ROOT`, or `--automation-root`
+- memory file: `<automation_root>/memory.md`
+- default mirror: `/tmp/<automation_name>/openai-codex.git`
 - artifact root: `$CODEX_HOME/config/deltas/<to_short_sha>/`
 
 ## Workflow

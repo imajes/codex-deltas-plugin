@@ -1,7 +1,8 @@
 # Orchestrate Config Rules
 
 - This skill owns only the config subworkflow.
-- Repository history should come from the bare mirror under `/tmp/codex-git-changelog/openai-codex.git`.
+- Resolve the automation root from `CODEX_DELTAS_AUTOMATION_ROOT`, `CODEX_AUTOMATION_ROOT`, or `--automation-root` when deriving default paths.
+- Repository history should come from the bare mirror under `/tmp/<automation_name>/openai-codex.git`, unless `--mirror` was provided explicitly.
 - Current schema and feature truth must be sourced from the bare mirror at the exact destination ref.
 - Do not depend on a local workspace checkout for current truth in this workflow.
 - Write artifacts only under `~/.codex/config/deltas`.

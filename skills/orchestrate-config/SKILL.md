@@ -22,8 +22,8 @@ Run the config-only subworkflow. This skill coordinates the config lanes but doe
 ## Operating paths
 
 - composite command: `codex-delta-orchestrate-config`
-- automation state: `$CODEX_HOME/automations/codex-git-changelog`
-- default bare mirror: `/tmp/codex-git-changelog/openai-codex.git`
+- automation root: supplied via `CODEX_DELTAS_AUTOMATION_ROOT`, `CODEX_AUTOMATION_ROOT`, or `--automation-root`
+- default bare mirror: `/tmp/<automation_name>/openai-codex.git`
 - canonical clean config: `$CODEX_HOME/config/config-CLEAN.toml`
 - live runtime config: `$CODEX_HOME/config/config.toml`
 - artifact root: `$CODEX_HOME/config/deltas/<to_short_sha>/`
@@ -69,7 +69,7 @@ Prepare changelog artifacts with the normal repo-local invocation:
 
 ```bash
 uv run codex-delta-orchestrate-config prepare-changelog-artifacts \
-  --mirror /tmp/codex-git-changelog/openai-codex.git \
+  --automation-root /ABS/PATH/TO/AUTOMATION \
   --from-sha <from_sha>
 ```
 

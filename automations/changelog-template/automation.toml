@@ -1,0 +1,14 @@
+version = 1
+id = "codex-delta-report-template"
+name = "Codex delta report template"
+status = "ACTIVE"
+rrule = "RRULE:FREQ=HOURLY;INTERVAL=6;BYMINUTE=0;BYDAY=MO,TU,WE,TH,FR"
+execution_environment = "local"
+model = "gpt-5.4"
+reasoning_effort = "high"
+# Prototype only: copy this file into a real automation root and customize `id`, `name`,
+# schedule, and any path/env bindings for the target automation.
+prompt = "Operate from the `codex-deltas` plugin and generate the Codex repository delta report using [$codex-deltas:orchestrate](skills/orchestrate/SKILL.md).\n\nWorking directories:\n- plugin root: current plugin checkout (`.`)\n- codex repo checkout: `/Users/james/src/artificial_intelligence/codex`\n- automation root: `$CODEX_DELTAS_AUTOMATION_ROOT`\n- artifact root: `$CODEX_HOME/config/deltas`\n\nFollow the plugin skill instructions and get it done."
+cwds = ["/tmp", "/Users/james/.codex", "/Users/james/.agents/plugins/codex-deltas"]
+created_at = 1771972261073
+updated_at = 1774481976801
