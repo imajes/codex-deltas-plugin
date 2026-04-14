@@ -25,6 +25,79 @@ from codex_config.commands import discover_range
 from codex_config.commands import update_state
 
 
+def make_inventory_entry(
+    path: str,
+    *,
+    classification: str = "new",
+    runtime_policy: str = "preserve-or-add",
+    default_value=None,
+    note: str = "New schema-visible key since comparison baseline.",
+    source: str = "schema",
+) -> dict[str, object]:
+    return {
+        "path": path,
+        "classification": classification,
+        "source": source,
+        "default_value": default_value,
+        "clean_policy": "active",
+        "runtime_policy": runtime_policy,
+        "note": note,
+        "migration_target": None,
+        "is_new": classification == "new",
+        "platform_specific": False,
+    }
+
+
+def test_tomlkit_parses_inter_table_comment_as_previous_table_comment_item() -> None:
+    doc = tomlkit.parse(
+        """
+[audio]
+microphone = "system"
+
+# Section link: https://example.com/env
+[shell_environment_policy]
+inherit = "all"
+""".strip()
+        + "\n"
+    )
+
+    audio_table = doc.body[0][1]
+    shell_table = doc.body[1][1]
+
+    assert isinstance(audio_table, tomlkit.items.Table)
+    assert isinstance(shell_table, tomlkit.items.Table)
+    assert audio_table.trivia.comment == ""
+    assert shell_table.trivia.comment == ""
+    assert isinstance(audio_table.value.body[2][1], tomlkit.items.Comment)
+    assert (
+        audio_table.value.body[2][1].trivia.comment
+        == "# Section link: https://example.com/env"
+    )
+
+
+def test_split_and_render_moves_inter_table_header_comment_under_next_header() -> None:
+    source = """
+[audio]
+microphone = "system"
+
+# Section link: https://example.com/env
+[shell_environment_policy]
+inherit = "all"
+""".strip() + "\n"
+
+    root_lines, blocks = shared.split_toml_blocks(source)
+    rendered = shared.render_toml_blocks(root_lines, blocks)
+
+    assert rendered == (
+        "[audio]\n"
+        'microphone = "system"\n'
+        "\n"
+        "[shell_environment_policy]\n"
+        "# Section link: https://example.com/env\n"
+        'inherit = "all"\n'
+    )
+
+
 def test_runtime_doc_with_tomlkit_migrates_permissions_and_removes_keys() -> None:
     runtime_text = """
 # top comment
@@ -346,6 +419,149 @@ enabled = true
     ]
 
 
+def test_runtime_additions_preserve_removals_and_add_safe_defaults_and_exemplars() -> None:
+    runtime_text = """
+sandbox_mode = "workspace-write"
+experimental_use_freeform_apply_patch = true
+
+[features]
+existing_feature = true
+""".strip() + "\n"
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "tui": {
+                "type": "object",
+                "properties": {
+                    "notification_condition": {
+                        "type": "string",
+                        "default": "unfocused",
+                        "description": "Controls when notifications are delivered.",
+                    }
+                },
+            },
+            "marketplaces": {
+                "type": "object",
+                "default": {},
+                "description": "User-level marketplace entries keyed by marketplace name.",
+                "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                        "source_type": {"type": "string", "enum": ["git"]},
+                        "source": {"type": "string"},
+                        "ref": {"type": "string"},
+                        "sparse_paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                },
+            },
+            "realtime": {
+                "type": "object",
+                "properties": {
+                    "transport": {
+                        "type": "string",
+                        "enum": ["webrtc", "websocket"],
+                    },
+                    "voice": {
+                        "type": "string",
+                        "enum": ["alloy", "verse"],
+                    },
+                },
+            },
+        },
+    }
+    inventory_entries = [
+        make_inventory_entry(
+            "experimental_use_freeform_apply_patch",
+            classification="removed",
+            runtime_policy="remove",
+            note="Removed from current config model; should not stay in either file.",
+            source="compatibility",
+        ),
+        make_inventory_entry(
+            "features.telepathy",
+            default_value=False,
+            note="New canonical feature key since 2250fdd (UnderDevelopment).",
+            source="feature-registry",
+        ),
+        make_inventory_entry("tui.notification_condition"),
+        make_inventory_entry("marketplaces"),
+        make_inventory_entry("realtime.transport"),
+        make_inventory_entry("realtime.voice"),
+    ]
+
+    runtime_without_removed = sync_config_files.runtime_doc_with_tomlkit(
+        runtime_text,
+        {"experimental_use_freeform_apply_patch"},
+    )
+    assert runtime_without_removed is not None
+
+    review = sync_config_files.build_runtime_addition_review(
+        inventory_entries,
+        schema,
+        runtime_without_removed,
+    )
+    proposed = sync_config_files.apply_runtime_addition_review(runtime_without_removed, review)
+
+    assert "experimental_use_freeform_apply_patch" not in proposed
+    assert 'telepathy = false  # bool; proposed safe default; feature default from the current feature registry; new since 2250fdd' in proposed
+    assert 'notification_condition = "unfocused"' in proposed
+    assert "[marketplaces.example]" in proposed
+    assert sync_config_files.EXEMPLAR_BLOCK_COMMENT in proposed
+    assert 'source_type = "git"' in proposed
+    assert 'source = "https://example.invalid/example-marketplace.git"' in proposed
+    assert "[realtime]" in proposed
+    assert 'transport = "websocket"' in proposed
+    assert 'voice = "alloy"' in proposed
+    assert [item.path for item in review.added_safe_defaults] == [
+        "features.telepathy",
+        "tui.notification_condition",
+    ]
+    assert [item.path for item in review.added_exemplars] == [
+        "marketplaces",
+        "realtime.transport",
+        "realtime.voice",
+    ]
+
+
+def test_runtime_additions_surface_ambiguous_keys_as_comment_only_review_stubs() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "realtime": {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string"},
+                },
+            }
+        },
+    }
+
+    review = sync_config_files.build_runtime_addition_review(
+        [make_inventory_entry("realtime.mode")],
+        schema,
+        'sandbox_mode = "workspace-write"\n',
+    )
+
+    assert not review.added_safe_defaults
+    assert not review.skipped
+    assert len(review.added_exemplars) == 1
+    assert review.added_exemplars[0].path == "realtime.mode"
+    assert "comment-only stub" in review.added_exemplars[0].review_note
+
+    proposed = sync_config_files.apply_runtime_addition_review(
+        'sandbox_mode = "workspace-write"\n',
+        review,
+    )
+
+    assert "[realtime]" in proposed
+    assert "# Example values added by codex-deltas; review and configure before applying." in proposed
+    assert "# mode =  # string; comment-only review stub; configure manually; no safe default or exemplar available; new since comparison baseline" in proposed
+
+
 def test_parse_active_keys_ignores_comment_text_when_reading_false() -> None:
     block = shared.TomlBlock(
         header="features",
@@ -430,6 +646,123 @@ def test_run_config_maintenance_writes_summary_artifacts_on_classify_failure(
     summary_text = summary_output.read_text(encoding="utf-8")
     assert "- stage: `classify`" in summary_text
     assert "classification exploded" in summary_text
+
+
+def test_run_config_maintenance_summary_includes_runtime_additions_review_section(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    clean = tmp_path / "config-CLEAN.toml"
+    runtime = tmp_path / "config.toml"
+    clean.write_text("[features]\nfeature_a = true\n", encoding="utf-8")
+    runtime.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+
+    delta_dir = tmp_path / "deltas"
+    skills_dir = tmp_path / "skills"
+    mirror = tmp_path / "mirror.git"
+    schema_path = tmp_path / "config.schema.json"
+    features_path = tmp_path / "lib.rs"
+    legacy_path = tmp_path / "legacy.rs"
+    schema_path.write_text('{"type":"object"}', encoding="utf-8")
+    features_path.write_text("features", encoding="utf-8")
+    legacy_path.write_text("legacy", encoding="utf-8")
+
+    monkeypatch.setattr(run_config_maintenance, "DELTA_DIR", delta_dir)
+    monkeypatch.setattr(run_config_maintenance, "SKILLS_DIR", skills_dir)
+    monkeypatch.setattr(run_config_maintenance, "ALIGN_TOOL", tmp_path / "align_toml_inline_comments")
+    monkeypatch.setattr(
+        run_config_maintenance,
+        "parse_args",
+        lambda: argparse.Namespace(
+            mode="sync-current",
+            automation_root=None,
+            mirror=mirror,
+            repo_url="https://github.com/openai/codex.git",
+            from_sha="1234567890abcdef",
+            config_clean=clean,
+            config_runtime=runtime,
+        ),
+    )
+    monkeypatch.setattr(
+        run_config_maintenance,
+        "ensure_mirror",
+        lambda path, repo_url: "abcdef1234567890",
+    )
+    monkeypatch.setattr(
+        run_config_maintenance,
+        "materialize_truth_sources",
+        lambda run_dir, git_dir, ref: {
+            "schema": schema_path,
+            "features_lib": features_path,
+            "legacy_features": legacy_path,
+        },
+    )
+
+    def fake_run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+        command_text = " ".join(command)
+        if "classify_config_keys.py" in command_text:
+            output_path = Path(command[command.index("--output") + 1])
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                '{"summary":{"new":3,"pre-schema":0,"legacy":0,"removed":0},"entries":[]}',
+                encoding="utf-8",
+            )
+        elif "sync_config_files.py" in command_text:
+            clean_output = Path(command[command.index("--output-clean") + 1])
+            runtime_output = Path(command[command.index("--output-runtime") + 1])
+            review_output = Path(command[command.index("--review-output") + 1])
+            clean_output.parent.mkdir(parents=True, exist_ok=True)
+            clean_output.write_text("[features]\nfeature_a = true\n", encoding="utf-8")
+            runtime_output.write_text('default_permissions = "workspace"\n', encoding="utf-8")
+            review_output.write_text(
+                json.dumps(
+                    {
+                        "added_safe_defaults": [
+                            {
+                                "path": "features.telepathy",
+                                "detail": "`features.telepathy` -> `false`",
+                                "review_note": "Added with a safe default.",
+                            }
+                        ],
+                        "added_exemplars": [
+                            {
+                                "path": "marketplaces",
+                                "detail": "`[marketplaces.example]` added as an exemplar",
+                                "review_note": "Added as an exemplar and requires manual configuration before applying.",
+                            },
+                            {
+                                "path": "realtime.mode",
+                                "detail": "`realtime.mode` surfaced as a comment-only review stub",
+                                "review_note": "Added as a comment-only stub and requires manual configuration before applying.",
+                            }
+                        ],
+                        "skipped": [],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        elif "validate_config_sync.py" in command_text:
+            output_path = Path(command[command.index("--output") + 1])
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text("# Config Validation\n\n## Result\n\n- validation passed\n", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(run_config_maintenance, "run", fake_run)
+
+    exit_code = run_config_maintenance.main()
+
+    summary_text = (delta_dir / "abcdef1" / "config-orchestration-summary.md").read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert "## Runtime Additions Requiring Review" in summary_text
+    assert "### Added with safe defaults" in summary_text
+    assert "### Added as exemplars and requiring manual configuration" in summary_text
+    assert "### Skipped because defaults or exemplars were too ambiguous" in summary_text
+    assert "`features.telepathy`" in summary_text
+    assert "`marketplaces`" in summary_text
+    assert "`realtime.mode`" in summary_text
 
 
 def test_materialize_truth_sources_reads_exact_ref_from_mirror(tmp_path: Path, monkeypatch) -> None:

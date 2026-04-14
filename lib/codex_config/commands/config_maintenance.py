@@ -215,6 +215,44 @@ def write_stage_section(lines: list[str], stage_results: list[dict[str, object]]
     lines.append("")
 
 
+def write_runtime_additions_section(lines: list[str], review_payload: dict[str, object] | None) -> None:
+    lines.extend(["## Runtime Additions Requiring Review", ""])
+    if review_payload is None:
+        lines.extend(
+            [
+                "- runtime additions review metadata was not emitted for this run.",
+                "",
+            ]
+        )
+        return
+
+    sections = [
+        ("### Added with safe defaults", review_payload.get("added_safe_defaults", [])),
+        (
+            "### Added as exemplars and requiring manual configuration",
+            review_payload.get("added_exemplars", []),
+        ),
+        ("### Skipped because defaults or exemplars were too ambiguous", review_payload.get("skipped", [])),
+    ]
+    for heading, raw_items in sections:
+        lines.extend([heading, ""])
+        items = raw_items if isinstance(raw_items, list) else []
+        if not items:
+            lines.append("- none")
+            lines.append("")
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path", "unknown")
+            detail = item.get("detail", "")
+            review_note = item.get("review_note", "")
+            detail_suffix = f": {detail}" if detail else ""
+            note_suffix = f" {review_note}" if review_note else ""
+            lines.append(f"- `{path}`{detail_suffix}{note_suffix}")
+        lines.append("")
+
+
 def main() -> int:
     args = parse_args()
     DELTA_DIR.mkdir(parents=True, exist_ok=True)
@@ -240,6 +278,7 @@ def main() -> int:
     validation_output = run_dir / ("validation-layout.md" if args.mode == "alpha-sort-only" else "validation.md")
     baseline_diff = run_dir / ("config-CLEAN-alpha-sort.diff" if args.mode == "alpha-sort-only" else "baseline-vs-runtime.diff")
     proposed_diff = run_dir / ("runtime-proposal.diff" if args.mode == "alpha-sort-only" else "proposed-patch.diff")
+    runtime_review_output = run_dir / "runtime-additions-review.json"
     summary_output = run_dir / (
         "layout-summary.md" if args.mode == "alpha-sort-only" else "config-orchestration-summary.md"
     )
@@ -328,6 +367,10 @@ def main() -> int:
                         str(features_lib),
                         "--legacy-features",
                         str(legacy_features),
+                        "--schema",
+                        str(schema),
+                        "--review-output",
+                        str(runtime_review_output),
                     ]
                 )
                 validate_cmd.extend(
@@ -443,6 +486,14 @@ def main() -> int:
             ]
         )
     write_stage_section(summary_lines, stage_results)
+    runtime_review_payload = None
+    if runtime_review_output.exists():
+        try:
+            runtime_review_payload = json.loads(runtime_review_output.read_text(encoding="utf-8"))
+        except Exception:
+            runtime_review_payload = None
+    if args.mode != "alpha-sort-only":
+        write_runtime_additions_section(summary_lines, runtime_review_payload)
     if validation_result is not None and validation_result.stderr.strip():
         summary_lines.extend(["## Validation stderr", "", "```text", validation_result.stderr.strip(), "```", ""])
     summary_lines.extend(validation_output.read_text(encoding="utf-8").rstrip().splitlines())

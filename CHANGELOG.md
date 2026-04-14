@@ -6,6 +6,54 @@ This repository does not yet use annotated release tags, so the version sections
 below are reconstructed from the committed version metadata and the actual git
 history in this repo.
 
+## [0.3.0] - 2026-04-14
+
+This release changes runtime proposal synthesis so newly classified
+`preserve-or-add` keys are surfaced in the generated artifacts instead of
+quietly disappearing when the live runtime file does not already contain them.
+
+### Changed
+
+- Added schema-aware runtime proposal planning for missing
+  `runtime_policy = "preserve-or-add"` keys:
+  - feature flags with explicit registry defaults are now proposed directly
+  - schema-visible scalar keys with explicit defaults are now proposed directly
+  - newly introduced structured keys can be surfaced as exemplars or
+    comment-only review stubs instead of being omitted
+- Added review metadata plumbing from synthesis into orchestration so the config
+  lane can explain which runtime additions were proposed automatically and which
+  still need manual completion.
+- Bumped the plugin/package metadata to `0.3.0` in both packaging and plugin
+  manifest surfaces.
+
+### Fixed
+
+- Fixed `proposed-config.toml` generation so missing runtime keys such as:
+  - `features.telepathy`
+  - `features.use_agent_identity`
+  - `tui.notification_condition`
+  - `marketplaces`
+  - `realtime.transport`
+  - `realtime.voice`
+  are now surfaced in the proposal according to policy instead of being silently
+  ignored.
+- Fixed exemplar handling so manual-review additions are called out in both:
+  - inline comments inside `proposed-config.toml`
+  - a dedicated `## Runtime Additions Requiring Review` section in
+    `config-orchestration-summary.md`
+- Fixed the ambiguous-key path so new runtime additions without a safe concrete
+  default are still brought to the user’s attention as comment-only review
+  stubs.
+
+### Tests
+
+- Extended the runtime sync test suite to cover:
+  - preserved removals
+  - safe-default runtime additions
+  - table-shaped exemplars
+  - comment-only review stubs for ambiguous additions
+  - the orchestration summary review section
+
 ## [0.2.0] - 2026-04-14
 
 This release turns the original config-deltas toolchain into a plugin-shaped,
