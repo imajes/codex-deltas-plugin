@@ -2,10 +2,11 @@
 
 - This skill owns only the config subworkflow.
 - Resolve the automation root from `CODEX_DELTAS_AUTOMATION_ROOT`, `CODEX_AUTOMATION_ROOT`, or `--automation-root` when deriving default paths.
-- Repository history should come from the bare mirror under `/tmp/<automation_name>/openai-codex.git`, unless `--mirror` was provided explicitly.
+- Resolve the repo URL from `CODEX_DELTAS_REPO_URL`, `CODEX_REPO_URL`, or `--repo-url` when deriving default paths.
+- Repository history should come from the bare mirror under `/tmp/<automation_name>/<repo_slug>.git`, unless `--mirror` was provided explicitly.
 - Current schema and feature truth must be sourced from the bare mirror at the exact destination ref.
 - Do not depend on a local workspace checkout for current truth in this workflow.
-- Write artifacts only under `~/.codex/config/deltas`.
+- Write artifacts only under `$CODEX_HOME/config/deltas`.
 - Update the canonical `config-CLEAN.toml` only after validation passes.
 - Never overwrite the live `config.toml`; emit a proposed runtime file plus a patch diff instead.
 - Include a short classification summary in every markdown output for full-sync runs: `new`, `pre-schema`, `legacy`, `removed`.

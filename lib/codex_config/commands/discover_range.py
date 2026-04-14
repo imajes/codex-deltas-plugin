@@ -8,13 +8,13 @@ from pathlib import Path
 
 from codex_config.automation_state import read_markdown_memory
 from codex_config.shared import automation_root
+from codex_config.shared import configured_repo_url
 from codex_config.shared import default_automation_memory_path
 from codex_config.shared import default_automation_mirror_path
 
 
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
 DELTA_DIR = CODEX_HOME / "config" / "deltas"
-REMOTE_URL = "https://github.com/openai/codex.git"
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--memory", type=Path)
     parser.add_argument("--mirror", type=Path)
     parser.add_argument("--from-sha")
-    parser.add_argument("--repo-url", default=REMOTE_URL)
+    parser.add_argument("--repo-url")
     parser.add_argument("--artifact-root", type=Path, default=DELTA_DIR)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
@@ -51,7 +51,7 @@ def ensure_mirror(path: Path, repo_url: str) -> str:
     return run_stdout(["git", f"--git-dir={path}", "rev-parse", "refs/heads/main"])
 
 
-def resolve_automation_inputs(args: argparse.Namespace) -> tuple[Path, Path]:
+def resolve_automation_inputs(args: argparse.Namespace, repo_url: str) -> tuple[Path, Path]:
     configured_root = args.automation_root or automation_root()
     memory_path = args.memory
     mirror_path = args.mirror
@@ -59,7 +59,7 @@ def resolve_automation_inputs(args: argparse.Namespace) -> tuple[Path, Path]:
     if memory_path is None and configured_root is not None:
         memory_path = default_automation_memory_path(configured_root)
     if mirror_path is None and configured_root is not None:
-        mirror_path = default_automation_mirror_path(configured_root)
+        mirror_path = default_automation_mirror_path(configured_root, repo_url)
 
     if memory_path is None:
         raise RuntimeError(
@@ -75,7 +75,8 @@ def resolve_automation_inputs(args: argparse.Namespace) -> tuple[Path, Path]:
 
 
 def build_run_context(args: argparse.Namespace) -> tuple[dict[str, object], Path]:
-    memory_path, mirror_path = resolve_automation_inputs(args)
+    repo_url = configured_repo_url(args.repo_url)
+    memory_path, mirror_path = resolve_automation_inputs(args, repo_url)
     memory = read_markdown_memory(memory_path)
     from_sha = args.from_sha or memory.get("last_reported_origin_main_sha") or None
     if not from_sha:
@@ -83,7 +84,7 @@ def build_run_context(args: argparse.Namespace) -> tuple[dict[str, object], Path
             "discover-range requires a baseline SHA; seed automation memory with "
             "`last_reported_origin_main_sha` or pass `--from-sha`."
         )
-    to_sha = ensure_mirror(mirror_path, args.repo_url)
+    to_sha = ensure_mirror(mirror_path, repo_url)
     compare_label = from_sha[:7]
     run_dir = args.artifact_root / to_sha[:7]
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -96,7 +97,7 @@ def build_run_context(args: argparse.Namespace) -> tuple[dict[str, object], Path
     range_expr = f"{from_sha}..{to_sha}"
 
     context = {
-        "repo_url": args.repo_url,
+        "repo_url": repo_url,
         "mirror_path": str(mirror_path),
         "memory_path": str(memory_path),
         "artifact_root": str(args.artifact_root),

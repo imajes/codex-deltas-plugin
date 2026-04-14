@@ -1,8 +1,9 @@
 # Orchestrate Rules
 
 - Resolve the automation root from `CODEX_DELTAS_AUTOMATION_ROOT`, `CODEX_AUTOMATION_ROOT`, or `--automation-root`.
+- Resolve the repo URL from `CODEX_DELTAS_REPO_URL`, `CODEX_REPO_URL`, or `--repo-url`.
 - Read automation memory first from `<automation_root>/memory.md`, unless `--memory` was provided explicitly.
-- Use only the bare mirror under `/tmp/<automation_name>/openai-codex.git` for repository history, commit ranges, and destination SHA selection, unless `--mirror` was provided explicitly.
+- Use only the bare mirror under `/tmp/<automation_name>/<repo_slug>.git` for repository history, commit ranges, and destination SHA selection, unless `--mirror` was provided explicitly.
 - Determine `from` from memory field `last_reported_origin_main_sha`.
 - If memory does not contain `last_reported_origin_main_sha`, stop and require an explicit `--from-sha` seed rather than inventing an init range.
 - Update the mirror before determining `to`. If mirror update fails, stop immediately and produce a failure-only report.
@@ -33,7 +34,7 @@
   - include classification summary exactly as `new: N, pre-schema: N, legacy: N, removed: N`
   - clearly distinguish visibility diff versus actionable proposed patch diff
   - print the full Markdown report in the conversation
-  - save the same substance to `~/.codex/config/deltas/<to_short_sha>/repo-delta-<from_short_sha>.md`
+  - save the same substance to `$CODEX_HOME/config/deltas/<to_short_sha>/repo-delta-<from_short_sha>.md`
 - On full success, compact automation memory to:
   - `repo_url`
   - `mirror_path`

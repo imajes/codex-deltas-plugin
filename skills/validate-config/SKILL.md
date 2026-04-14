@@ -18,7 +18,7 @@ Validate generated config artifacts. This skill owns policy checks only.
 1. Read the generated clean/runtime artifacts.
 2. Validate ordering, section comments, and TOML parseability.
 3. In full mode, validate feature defaults, removed keys, legacy keys, and runtime permission-shape migrations.
-4. Emit one markdown validation summary under `~/.codex/config/deltas/...`.
+4. Emit one markdown validation summary under `$CODEX_HOME/config/deltas/...`.
 
 ## Script
 

@@ -19,8 +19,8 @@ Classify Codex config keys before touching either config file. This skill owns n
    - `codex-rs/features/src/lib.rs`
    - `codex-rs/features/src/legacy.rs`
    - `codex-rs/core/config.schema.json`
-2. Compare against `~/.codex/config/config-CLEAN.toml` and `~/.codex/config/config.toml`.
-3. Emit one config findings JSON under `~/.codex/config/deltas/`.
+2. Compare against `$CODEX_HOME/config/config-CLEAN.toml` and `$CODEX_HOME/config/config.toml`.
+3. Emit one config findings JSON under `$CODEX_HOME/config/deltas/`.
 
 ## Categories
 

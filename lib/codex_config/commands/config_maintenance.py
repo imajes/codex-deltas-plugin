@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from codex_config.shared import automation_root
+from codex_config.shared import configured_repo_url
 from codex_config.shared import default_automation_mirror_path
 
 
@@ -18,7 +19,6 @@ CODEX_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expandus
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SKILLS_DIR = REPO_ROOT / "skills"
 DELTA_DIR = CODEX_HOME / "config" / "deltas"
-REMOTE_URL = "https://github.com/openai/codex.git"
 ALIGN_TOOL = CODEX_HOME / "bin" / "align_toml_inline_comments"
 
 
@@ -38,6 +38,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--automation-root", type=Path)
     parser.add_argument("--mirror", type=Path)
+    parser.add_argument("--repo-url")
     parser.add_argument("--from-sha")
     parser.add_argument("--config-clean", type=Path, default=CODEX_HOME / "config" / "config-CLEAN.toml")
     parser.add_argument("--config-runtime", type=Path, default=CODEX_HOME / "config" / "config.toml")
@@ -70,16 +71,16 @@ def run_stage(stage_results: list[dict[str, object]], name: str, command: list[s
     return result
 
 
-def ensure_mirror(path: Path) -> str:
+def ensure_mirror(path: Path, repo_url: str) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         subprocess.run(
-            ["git", "clone", "--mirror", REMOTE_URL, str(path)],
+            ["git", "clone", "--mirror", repo_url, str(path)],
             check=True,
         )
     else:
         subprocess.run(
-            ["git", f"--git-dir={path}", "remote", "set-url", "origin", REMOTE_URL],
+            ["git", f"--git-dir={path}", "remote", "set-url", "origin", repo_url],
             check=True,
         )
     subprocess.run(
@@ -89,12 +90,12 @@ def ensure_mirror(path: Path) -> str:
     return run_stdout(["git", f"--git-dir={path}", "rev-parse", "refs/heads/main"])
 
 
-def resolve_mirror_path(args: argparse.Namespace) -> Path:
+def resolve_mirror_path(args: argparse.Namespace, repo_url: str) -> Path:
     if args.mirror is not None:
         return args.mirror
     configured_root = args.automation_root or automation_root()
     if configured_root is not None:
-        return default_automation_mirror_path(configured_root)
+        return default_automation_mirror_path(configured_root, repo_url)
     raise RuntimeError(
         "config orchestration requires `--mirror` or an automation root via `--automation-root`, "
         "`CODEX_DELTAS_AUTOMATION_ROOT`, or `CODEX_AUTOMATION_ROOT`."
@@ -217,10 +218,11 @@ def write_stage_section(lines: list[str], stage_results: list[dict[str, object]]
 def main() -> int:
     args = parse_args()
     DELTA_DIR.mkdir(parents=True, exist_ok=True)
-    mirror_path = resolve_mirror_path(args)
+    repo_url = configured_repo_url(args.repo_url)
+    mirror_path = resolve_mirror_path(args, repo_url)
 
     compare_sha = args.from_sha
-    current_sha = ensure_mirror(mirror_path)
+    current_sha = ensure_mirror(mirror_path, repo_url)
     repo_for_history = mirror_path
     if args.mode != "alpha-sort-only" and not compare_sha:
         raise RuntimeError(
@@ -414,6 +416,7 @@ def main() -> int:
         "",
         f"- mode: `{args.mode}`",
         f"- repo_for_history: `{repo_for_history}`",
+        f"- repo_url: `{repo_url}`",
         f"- current_sha: `{current_sha}`",
         f"- compare_sha: `{compare_sha or 'none'}`",
         f"- mirror: `{mirror_path}`",

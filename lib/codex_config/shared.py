@@ -9,6 +9,7 @@ from dataclasses import asdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 try:
     import tomllib  # type: ignore[attr-defined]
@@ -83,6 +84,7 @@ ROOT_PINNED_COMMENT = (
 )
 NEW_SINCE_RE = re.compile(r"New canonical feature key since (?P<sha>[0-9a-f]{7,40})")
 FEATURE_ENTRY_START = "FeatureSpec {"
+DEFAULT_REPO_URL = "https://github.com/openai/codex.git"
 
 
 @dataclass(frozen=True)
@@ -136,13 +138,40 @@ def automation_root() -> Path | None:
     return None
 
 
+def configured_repo_url(explicit: str | None = None) -> str:
+    if explicit:
+        return explicit
+    for key in ("CODEX_DELTAS_REPO_URL", "CODEX_REPO_URL"):
+        value = os.environ.get(key)
+        if value:
+            return value
+    return DEFAULT_REPO_URL
+
+
+def repo_slug(repo_url: str) -> str:
+    value = repo_url.strip().rstrip("/")
+    if "://" in value:
+        path = urlparse(value).path
+    elif ":" in value and "/" in value.split(":", 1)[1]:
+        path = value.split(":", 1)[1]
+    else:
+        path = value
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    segments = [segment for segment in re.split(r"[\\/]+", path) if segment]
+    slug = "-".join(segments[-2:] if len(segments) >= 2 else segments)
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", slug).strip("-.")
+    return normalized or "repo"
+
+
 def default_automation_memory_path(root: Path) -> Path:
     return root / "memory.md"
 
 
-def default_automation_mirror_path(root: Path, repo_name: str = "openai-codex.git") -> Path:
+def default_automation_mirror_path(root: Path, repo_url: str) -> Path:
     automation_name = root.name or "codex-automation"
-    return Path("/tmp") / automation_name / repo_name
+    return Path("/tmp") / automation_name / f"{repo_slug(repo_url)}.git"
 
 
 def read_text(path: Path) -> str:

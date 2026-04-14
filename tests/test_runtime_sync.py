@@ -385,12 +385,17 @@ def test_run_config_maintenance_writes_summary_artifacts_on_classify_failure(
             mode="sync-current",
             automation_root=None,
             mirror=mirror,
+            repo_url="https://github.com/openai/codex.git",
             from_sha="1234567890abcdef",
             config_clean=clean,
             config_runtime=runtime,
         ),
     )
-    monkeypatch.setattr(run_config_maintenance, "ensure_mirror", lambda path: "abcdef1234567890")
+    monkeypatch.setattr(
+        run_config_maintenance,
+        "ensure_mirror",
+        lambda path, repo_url: "abcdef1234567890",
+    )
     monkeypatch.setattr(
         run_config_maintenance,
         "materialize_truth_sources",
@@ -487,12 +492,17 @@ def test_prepare_changelog_artifacts_uses_materialized_mirror_truth(
             mode="prepare-changelog-artifacts",
             automation_root=None,
             mirror=mirror,
+            repo_url="https://github.com/openai/codex.git",
             from_sha="1234567890abcdef",
             config_clean=clean,
             config_runtime=runtime,
         ),
     )
-    monkeypatch.setattr(run_config_maintenance, "ensure_mirror", lambda path: "abcdef1234567890")
+    monkeypatch.setattr(
+        run_config_maintenance,
+        "ensure_mirror",
+        lambda path, repo_url: "abcdef1234567890",
+    )
     monkeypatch.setattr(
         run_config_maintenance,
         "materialize_truth_sources",
@@ -649,6 +659,7 @@ def test_discover_range_derives_memory_and_mirror_from_automation_root_env(
         encoding="utf-8",
     )
     monkeypatch.setenv("CODEX_DELTAS_AUTOMATION_ROOT", str(automation_root))
+    monkeypatch.setenv("CODEX_DELTAS_REPO_URL", "https://github.com/openai/codex.git")
 
     seen: dict[str, Path] = {}
 
@@ -674,6 +685,54 @@ def test_discover_range_derives_memory_and_mirror_from_automation_root_env(
     assert output == artifact_root / "abcdef1" / "run-context.json"
     assert context["memory_path"] == str(memory_path)
     assert seen["mirror"] == Path("/tmp") / "delta-run" / "openai-codex.git"
+
+
+def test_discover_range_derives_repo_specific_mirror_name_from_repo_url(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    automation_root = tmp_path / "automations" / "delta-run"
+    memory_path = automation_root / "memory.md"
+    artifact_root = tmp_path / "deltas"
+    memory_path.parent.mkdir(parents=True, exist_ok=True)
+    memory_path.write_text(
+        "\n".join(
+            [
+                "# delta-run memory",
+                "",
+                "- last_reported_origin_main_sha: 1234567890abcdef1234567890abcdef12345678",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    seen: dict[str, Path] = {}
+
+    def fake_ensure_mirror(path: Path, repo_url: str) -> str:
+        seen["mirror"] = path
+        seen["repo_url"] = repo_url
+        return "abcdef1234567890abcdef1234567890abcdef12"
+
+    monkeypatch.setattr(discover_range, "ensure_mirror", fake_ensure_mirror)
+    monkeypatch.setattr(discover_range, "run_stdout", lambda command: "7")
+
+    context, output = discover_range.build_run_context(
+        argparse.Namespace(
+            automation_root=automation_root,
+            memory=None,
+            mirror=None,
+            from_sha=None,
+            repo_url="https://github.com/example/alt-repo.git",
+            artifact_root=artifact_root,
+            output=None,
+        )
+    )
+
+    assert output == artifact_root / "abcdef1" / "run-context.json"
+    assert context["repo_url"] == "https://github.com/example/alt-repo.git"
+    assert seen["repo_url"] == "https://github.com/example/alt-repo.git"
+    assert seen["mirror"] == Path("/tmp") / "delta-run" / "example-alt-repo.git"
 
 
 def test_analyze_repo_builds_findings_from_run_context(monkeypatch) -> None:
