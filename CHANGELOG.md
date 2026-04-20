@@ -6,6 +6,39 @@ This repository does not yet use annotated release tags, so the version sections
 below are reconstructed from the committed version metadata and the actual git
 history in this repo.
 
+## [0.5.2] - 2026-04-20
+
+This release finishes hardening config sync around real runtime path shapes by
+teaching description fallback to follow equivalent schema shapes and by fixing
+removal of quoted dotted TOML keys in generated runtime proposals.
+
+### Fixed
+
+- Fixed runtime addition review so nested schema-visible paths can inherit
+  meaningful descriptions from equivalent canonical paths discovered directly
+  from the current `schema.json` shape, instead of relying on one-off
+  hardcoded path mappings.
+- Fixed comment-only review stubs for mirrored profile-scoped keys such as
+  `profiles.example.features.apply_patch_streaming_events`, which now reuse the
+  canonical feature description instead of aborting sync.
+- Fixed runtime proposal removals for dotted TOML leaf keys such as
+  `[notice.model_migrations].\"gpt-5.2\"`, allowing validator-flagged removed
+  notice migration acknowledgements to be deleted correctly.
+
+### Changed
+
+- Added a schema-shape index to config synthesis so equivalent object
+  containers can be matched structurally and reused during description lookup.
+- Bumped the plugin/package metadata to `0.5.2` in packaging, plugin manifest,
+  and lockfile surfaces.
+
+### Tests
+
+- Extended `tests/test_runtime_sync.py` with regression coverage for:
+  - schema-equivalent nested description inheritance
+  - profile-scoped feature description inheritance
+  - removal of quoted dotted TOML leaf keys
+
 ## [0.5.1] - 2026-04-20
 
 This release hardens config sync after the 0.5.0 comment-generation changes so

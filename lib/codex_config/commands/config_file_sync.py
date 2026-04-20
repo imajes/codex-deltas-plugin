@@ -72,6 +72,12 @@ class RuntimeAdditionReview:
         }
 
 
+@dataclass(frozen=True)
+class SchemaShapeIndex:
+    nodes_by_path: dict[str, dict[str, Any]]
+    object_paths_by_signature: dict[str, list[str]]
+
+
 EXEMPLAR_BLOCK_COMMENT = (
     "# Example values added by codex-deltas; review and configure before applying."
 )
@@ -399,6 +405,7 @@ def remove_runtime_doc_path(node, path_parts: list[str]) -> None:
         return
     child = node.get(path_parts[0])
     if child is None:
+        node.pop(".".join(path_parts), None)
         return
     remove_runtime_doc_path(child, path_parts[1:])
     if hasattr(child, "items") and not list(child.items()):
@@ -590,17 +597,135 @@ def new_since_label(entry: dict[str, Any]) -> str:
     return ""
 
 
+def strip_schema_shape_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: strip_schema_shape_metadata(child)
+            for key, child in value.items()
+            if key not in {"default", "description", "examples", "title"}
+        }
+    if isinstance(value, list):
+        return [strip_schema_shape_metadata(item) for item in value]
+    return value
+
+
+def schema_shape_signature(node: dict[str, Any]) -> str:
+    return json.dumps(strip_schema_shape_metadata(node), sort_keys=True)
+
+
+def is_object_like_schema(node: dict[str, Any]) -> bool:
+    return (
+        node.get("type") == "object"
+        or isinstance(node.get("properties"), dict)
+        or isinstance(node.get("additionalProperties"), dict)
+    )
+
+
+def build_schema_shape_index(schema: dict[str, Any]) -> SchemaShapeIndex:
+    nodes_by_path: dict[str, dict[str, Any]] = {}
+
+    def visit(path: str, node: Any) -> None:
+        normalized = normalize_schema_node(schema, node)
+        if path in nodes_by_path:
+            return
+        nodes_by_path[path] = normalized
+
+        properties = normalized.get("properties")
+        if isinstance(properties, dict):
+            for key, child in properties.items():
+                child_path = f"{path}.{key}" if path else key
+                visit(child_path, child)
+
+        additional = normalized.get("additionalProperties")
+        if isinstance(additional, dict):
+            child_path = f"{path}.example" if path else "example"
+            visit(child_path, additional)
+
+    visit("", schema)
+
+    object_paths_by_signature: dict[str, list[str]] = {}
+    for path, node in nodes_by_path.items():
+        if not is_object_like_schema(node):
+            continue
+        signature = schema_shape_signature(node)
+        object_paths_by_signature.setdefault(signature, []).append(path)
+
+    for paths in object_paths_by_signature.values():
+        paths.sort(key=lambda item: (len(split_header_path(item)), item))
+
+    return SchemaShapeIndex(
+        nodes_by_path=nodes_by_path,
+        object_paths_by_signature=object_paths_by_signature,
+    )
+
+
+def equivalent_schema_paths(
+    path: str,
+    shape_index: SchemaShapeIndex | None,
+) -> list[str]:
+    candidates: list[str] = [path]
+    if shape_index is None:
+        return candidates
+
+    node = shape_index.nodes_by_path.get(path)
+    if node is not None and is_object_like_schema(node):
+        signature = schema_shape_signature(node)
+        for candidate_path in shape_index.object_paths_by_signature.get(signature, []):
+            if candidate_path != path:
+                candidates.append(candidate_path)
+        return candidates
+
+    parts = split_header_path(path)
+    if len(parts) < 2:
+        return candidates
+
+    parent_path = ".".join(parts[:-1])
+    key_name = parts[-1]
+    parent_node = shape_index.nodes_by_path.get(parent_path)
+    if parent_node is None or not is_object_like_schema(parent_node):
+        return candidates
+
+    parent_signature = schema_shape_signature(parent_node)
+    for candidate_parent in shape_index.object_paths_by_signature.get(parent_signature, []):
+        candidate_path = f"{candidate_parent}.{key_name}" if candidate_parent else key_name
+        if candidate_path != path and candidate_path in shape_index.nodes_by_path:
+            candidates.append(candidate_path)
+    return candidates
+
+
 def resolve_meaningful_description(
     entry: dict[str, Any],
     node: dict[str, Any] | None,
     *,
+    inventory_by_path: dict[str, dict[str, Any]] | None = None,
+    schema: dict[str, Any] | None = None,
+    shape_index: SchemaShapeIndex | None = None,
     description_override: str | None = None,
 ) -> str:
+    path = str(entry.get("path", ""))
+    candidate_paths = equivalent_schema_paths(path, shape_index)
     description = description_override or str(entry.get("description") or "").strip()
+    if not description and inventory_by_path is not None:
+        for candidate_path in candidate_paths[1:]:
+            candidate_entry = inventory_by_path.get(candidate_path)
+            if not candidate_entry:
+                continue
+            description = str(candidate_entry.get("description") or "").strip()
+            if description:
+                break
     if not description:
-        description = PATH_DESCRIPTION_OVERRIDES.get(str(entry.get("path", "")), "")
+        for candidate_path in candidate_paths:
+            description = PATH_DESCRIPTION_OVERRIDES.get(candidate_path, "")
+            if description:
+                break
     if not description:
         description = summarize_schema_description(node or {})
+    if not description and schema is not None:
+        for candidate_path in candidate_paths[1:]:
+            candidate_node = lookup_schema_node(schema, candidate_path)
+            description = summarize_schema_description(candidate_node or {})
+            if description:
+                break
     note = str(entry.get("note") or "").strip()
     if not description and entry.get("classification") == "pre-schema":
         description = note
@@ -618,6 +743,9 @@ def format_runtime_comment(
     entry: dict[str, Any],
     node: dict[str, Any] | None,
     *,
+    inventory_by_path: dict[str, dict[str, Any]] | None = None,
+    schema: dict[str, Any] | None = None,
+    shape_index: SchemaShapeIndex | None = None,
     status: str,
     description_override: str | None = None,
 ) -> str:
@@ -631,6 +759,9 @@ def format_runtime_comment(
         resolve_meaningful_description(
             entry,
             schema_node,
+            inventory_by_path=inventory_by_path,
+            schema=schema,
+            shape_index=shape_index,
             description_override=description_override,
         )
     )
@@ -720,6 +851,9 @@ def make_assignment_record(
     node: dict[str, Any] | None,
     value: Any,
     *,
+    inventory_by_path: dict[str, dict[str, Any]] | None = None,
+    schema: dict[str, Any] | None = None,
+    shape_index: SchemaShapeIndex | None = None,
     status: str,
     description_override: str | None = None,
 ) -> RuntimeAdditionRecord | None:
@@ -732,6 +866,9 @@ def make_assignment_record(
     comment = format_runtime_comment(
         entry,
         node,
+        inventory_by_path=inventory_by_path,
+        schema=schema,
+        shape_index=shape_index,
         status=status,
         description_override=description_override,
     )
@@ -758,6 +895,9 @@ def make_comment_stub_record(
     path: str,
     node: dict[str, Any] | None,
     *,
+    inventory_by_path: dict[str, dict[str, Any]] | None = None,
+    schema: dict[str, Any] | None = None,
+    shape_index: SchemaShapeIndex | None = None,
     reason: str,
 ) -> RuntimeAdditionRecord:
     parts = split_header_path(path)
@@ -770,7 +910,15 @@ def make_comment_stub_record(
         "configure manually",
         reason,
     ]
-    comment_parts.append(resolve_meaningful_description(entry, schema_node))
+    comment_parts.append(
+        resolve_meaningful_description(
+            entry,
+            schema_node,
+            inventory_by_path=inventory_by_path,
+            schema=schema,
+            shape_index=shape_index,
+        )
+    )
     new_since = new_since_label(entry)
     if new_since:
         comment_parts.append(new_since)
@@ -792,6 +940,9 @@ def build_object_exemplar_record(
     schema: dict[str, Any],
     entry: dict[str, Any],
     node: dict[str, Any],
+    *,
+    inventory_by_path: dict[str, dict[str, Any]] | None = None,
+    shape_index: SchemaShapeIndex | None = None,
 ) -> RuntimeAdditionRecord | None:
     target_header = entry["path"]
     body_node = node
@@ -818,6 +969,9 @@ def build_object_exemplar_record(
                 child_path,
                 child_node,
                 default_value,
+                inventory_by_path=inventory_by_path,
+                schema=schema,
+                shape_index=shape_index,
                 status="exemplar",
             )
             if record is not None and record.rendered_lines:
@@ -831,6 +985,9 @@ def build_object_exemplar_record(
                 child_path,
                 child_node,
                 placeholder,
+                inventory_by_path=inventory_by_path,
+                schema=schema,
+                shape_index=shape_index,
                 status="exemplar",
             )
             if record is not None and record.rendered_lines:
@@ -838,7 +995,13 @@ def build_object_exemplar_record(
             continue
 
         child_type = schema_type_label(child_node)
-        child_description = resolve_meaningful_description({"path": child_path}, child_node)
+        child_description = resolve_meaningful_description(
+            {"path": child_path},
+            child_node,
+            inventory_by_path=inventory_by_path,
+            schema=schema,
+            shape_index=shape_index,
+        )
         comment_only_lines.append(
             f"# configure `{key_name}` ({child_type}) manually; {child_description}; no safe exemplar could be derived"
         )
@@ -871,6 +1034,8 @@ def build_runtime_addition_review(
     schema: dict[str, Any],
     runtime_text: str,
 ) -> RuntimeAdditionReview:
+    inventory_by_path = {entry["path"]: entry for entry in inventory_entries}
+    shape_index = build_schema_shape_index(schema)
     active_paths = flatten_active_toml_paths_from_text(runtime_text)
     _, runtime_blocks = split_toml_blocks(runtime_text)
     safe_defaults: list[RuntimeAdditionRecord] = []
@@ -894,6 +1059,9 @@ def build_runtime_addition_review(
                 path,
                 {"type": "boolean"},
                 entry["default_value"],
+                inventory_by_path=inventory_by_path,
+                schema=schema,
+                shape_index=shape_index,
                 status="safe-default",
             )
             if record is not None:
@@ -908,6 +1076,9 @@ def build_runtime_addition_review(
                         entry,
                         path,
                         None,
+                        inventory_by_path=inventory_by_path,
+                        schema=schema,
+                        shape_index=shape_index,
                         reason="not yet modeled in current schema",
                     )
                 )
@@ -921,6 +1092,9 @@ def build_runtime_addition_review(
                 path,
                 schema_node,
                 default_value,
+                inventory_by_path=inventory_by_path,
+                schema=schema,
+                shape_index=shape_index,
                 status="safe-default",
             )
             if record is not None:
@@ -937,6 +1111,9 @@ def build_runtime_addition_review(
                 path,
                 schema_node,
                 placeholder,
+                inventory_by_path=inventory_by_path,
+                schema=schema,
+                shape_index=shape_index,
                 status="exemplar",
             )
             if record is not None:
@@ -944,7 +1121,13 @@ def build_runtime_addition_review(
                 continue
 
         if schema_node.get("type") == "object" or isinstance(schema_node.get("additionalProperties"), dict):
-            record = build_object_exemplar_record(schema, entry, schema_node)
+            record = build_object_exemplar_record(
+                schema,
+                entry,
+                schema_node,
+                inventory_by_path=inventory_by_path,
+                shape_index=shape_index,
+            )
             if record is not None:
                 exemplars.append(record)
                 continue
@@ -954,6 +1137,9 @@ def build_runtime_addition_review(
                 entry,
                 path,
                 schema_node,
+                inventory_by_path=inventory_by_path,
+                schema=schema,
+                shape_index=shape_index,
                 reason="no safe default or exemplar available",
             )
         )

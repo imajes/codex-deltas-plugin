@@ -241,6 +241,28 @@ trust_level = "trusted"
     assert "projects" not in document
 
 
+def test_runtime_doc_with_tomlkit_removes_dotted_leaf_keys() -> None:
+    runtime_text = """
+[notice.model_migrations]
+"gpt-5.2" = "gpt-5.3-codex"
+"gpt-5.2-codex" = "gpt-5.3-codex"
+"gpt-5.3-codex" = "gpt-5.4"
+"""
+
+    output = sync_config_files.runtime_doc_with_tomlkit(
+        runtime_text,
+        {
+            "notice.model_migrations.gpt-5.2",
+            "notice.model_migrations.gpt-5.2-codex",
+            "notice.model_migrations.gpt-5.3-codex",
+        },
+    )
+
+    assert output is not None
+    parsed = tomlkit.parse(output)
+    assert "notice" not in parsed
+
+
 def test_flatten_active_toml_paths_handles_inline_section_comments(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
@@ -681,6 +703,149 @@ def test_runtime_additions_dynamic_schema_key_without_description_uses_schema_fa
         "schema-defined dynamic setting for `plugins.example.enabled`"
         in review.added_safe_defaults[0].detail
     )
+
+
+def test_runtime_additions_profile_feature_mirror_uses_root_feature_description() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "features": {
+                "type": "object",
+                "properties": {
+                    "apply_patch_streaming_events": {
+                        "type": "boolean",
+                    }
+                },
+            },
+            "profiles": {
+                "type": "object",
+                "properties": {
+                    "example": {
+                        "type": "object",
+                        "properties": {
+                            "features": {
+                                "type": "object",
+                                "properties": {
+                                    "apply_patch_streaming_events": {
+                                        "type": "boolean",
+                                    }
+                                },
+                            }
+                        },
+                    }
+                },
+            },
+        },
+    }
+
+    review = sync_config_files.build_runtime_addition_review(
+        [
+            make_inventory_entry(
+                "features.apply_patch_streaming_events",
+                classification="new",
+                source="feature-registry",
+                default_value=False,
+                note="New canonical feature key since 769b1c3 (UnderDevelopment).",
+                description="stream structured progress while apply_patch input is being generated.",
+            ),
+            make_inventory_entry(
+                "profiles.example.features.apply_patch_streaming_events",
+                classification="new",
+                source="schema",
+                note="New schema-visible key since comparison baseline.",
+            )
+        ],
+        schema,
+        'sandbox_mode = "workspace-write"\n',
+    )
+
+    assert [item.path for item in review.added_safe_defaults] == [
+        "features.apply_patch_streaming_events",
+    ]
+    assert [item.path for item in review.added_exemplars] == [
+        "profiles.example.features.apply_patch_streaming_events",
+    ]
+    assert review.added_exemplars[0].rendered_lines == [
+        "# apply_patch_streaming_events =  # bool; comment-only review stub; configure manually; "
+        "no safe default or exemplar available; stream structured progress while apply_patch input is being generated.; "
+        "new since comparison baseline"
+    ]
+    assert (
+        "stream structured progress while apply_patch input is being generated."
+        in review.added_exemplars[0].detail
+    )
+
+
+def test_runtime_additions_schema_equivalent_nested_path_uses_root_inventory_description() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "tool_section": {
+                "type": "object",
+                "properties": {
+                    "discoverables": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    }
+                },
+            },
+            "profiles": {
+                "type": "object",
+                "properties": {
+                    "example": {
+                        "type": "object",
+                        "properties": {
+                            "nested_tool_section": {
+                                "type": "object",
+                                "properties": {
+                                    "discoverables": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    }
+                                },
+                            }
+                        },
+                    }
+                },
+            },
+        },
+    }
+
+    review = sync_config_files.build_runtime_addition_review(
+        [
+            make_inventory_entry(
+                "tool_section.discoverables",
+                classification="new",
+                source="schema",
+                note="New schema-visible key since comparison baseline.",
+                description="ordered list of discoverable tool identifiers.",
+            ),
+            make_inventory_entry(
+                "profiles.example.nested_tool_section.discoverables",
+                classification="new",
+                source="schema",
+                note="New schema-visible key since comparison baseline.",
+            ),
+        ],
+        schema,
+        'sandbox_mode = "workspace-write"\n',
+    )
+
+    assert [item.path for item in review.added_exemplars] == [
+        "profiles.example.nested_tool_section.discoverables",
+        "tool_section.discoverables",
+    ]
+    nested = next(
+        item
+        for item in review.added_exemplars
+        if item.path == "profiles.example.nested_tool_section.discoverables"
+    )
+    assert nested.rendered_lines == [
+        "# discoverables =  # array<string>; comment-only review stub; configure manually; "
+        "no safe default or exemplar available; ordered list of discoverable tool identifiers.; "
+        "new since comparison baseline"
+    ]
+    assert "ordered list of discoverable tool identifiers." in nested.detail
 
 
 def test_build_feature_comment_for_legacy_alias_includes_description_and_canonical_key() -> None:
