@@ -20,6 +20,8 @@ Rewrite the clean baseline and proposed runtime config from a lifecycle inventor
 3. In full mode, rewrite `config-CLEAN.toml` canonically and rewrite a proposed runtime file with targeted normalization only.
 4. Keep deprecated/legacy keys commented in clean and absent from runtime proposals.
 5. Hand the outputs to `[$codex-deltas:validate-config](../validate-config/SKILL.md)`.
+6. Emit meaningful comments for generated additions and feature flags; do not preserve or invent boilerplate descriptions.
+7. If a generated comment cannot be backed by current schema metadata or current code semantics, fail the run instead of emitting a placeholder.
 
 ## Scripts
 

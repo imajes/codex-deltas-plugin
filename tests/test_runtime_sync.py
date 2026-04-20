@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import tomlkit
 
 
@@ -33,6 +34,8 @@ def make_inventory_entry(
     default_value=None,
     note: str = "New schema-visible key since comparison baseline.",
     source: str = "schema",
+    description: str | None = None,
+    canonical_key: str | None = None,
 ) -> dict[str, object]:
     return {
         "path": path,
@@ -45,6 +48,8 @@ def make_inventory_entry(
         "migration_target": None,
         "is_new": classification == "new",
         "platform_specific": False,
+        "description": description,
+        "canonical_key": canonical_key,
     }
 
 
@@ -448,12 +453,23 @@ existing_feature = true
                 "additionalProperties": {
                     "type": "object",
                     "properties": {
-                        "source_type": {"type": "string", "enum": ["git"]},
-                        "source": {"type": "string"},
-                        "ref": {"type": "string"},
+                        "source_type": {
+                            "type": "string",
+                            "enum": ["git"],
+                            "description": "Source kind used to install this marketplace.",
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": "Source location used when the marketplace was added.",
+                        },
+                        "ref": {
+                            "type": "string",
+                            "description": "Git ref to check out when `source_type` is `git`.",
+                        },
                         "sparse_paths": {
                             "type": "array",
                             "items": {"type": "string"},
+                            "description": "Sparse checkout paths used when `source_type` is `git`.",
                         },
                     },
                 },
@@ -482,10 +498,11 @@ existing_feature = true
             source="compatibility",
         ),
         make_inventory_entry(
-            "features.telepathy",
-            default_value=False,
+            "features.workspace_dependencies",
+            default_value=True,
             note="New canonical feature key since 2250fdd (UnderDevelopment).",
             source="feature-registry",
+            description="enable workspace dependency support.",
         ),
         make_inventory_entry("tui.notification_condition"),
         make_inventory_entry("marketplaces"),
@@ -507,7 +524,10 @@ existing_feature = true
     proposed = sync_config_files.apply_runtime_addition_review(runtime_without_removed, review)
 
     assert "experimental_use_freeform_apply_patch" not in proposed
-    assert 'telepathy = false  # bool; proposed safe default; feature default from the current feature registry; new since 2250fdd' in proposed
+    assert (
+        "workspace_dependencies = true  # bool; proposed safe default; "
+        "enable workspace dependency support.; new since 2250fdd"
+    ) in proposed
     assert 'notification_condition = "unfocused"' in proposed
     assert "[marketplaces.example]" in proposed
     assert sync_config_files.EXEMPLAR_BLOCK_COMMENT in proposed
@@ -517,7 +537,7 @@ existing_feature = true
     assert 'transport = "websocket"' in proposed
     assert 'voice = "alloy"' in proposed
     assert [item.path for item in review.added_safe_defaults] == [
-        "features.telepathy",
+        "features.workspace_dependencies",
         "tui.notification_condition",
     ]
     assert [item.path for item in review.added_exemplars] == [
@@ -527,7 +547,7 @@ existing_feature = true
     ]
 
 
-def test_runtime_additions_surface_ambiguous_keys_as_comment_only_review_stubs() -> None:
+def test_runtime_additions_fail_when_no_meaningful_description_can_be_derived() -> None:
     schema = {
         "type": "object",
         "properties": {
@@ -540,26 +560,29 @@ def test_runtime_additions_surface_ambiguous_keys_as_comment_only_review_stubs()
         },
     }
 
-    review = sync_config_files.build_runtime_addition_review(
-        [make_inventory_entry("realtime.mode")],
-        schema,
-        'sandbox_mode = "workspace-write"\n',
+    with pytest.raises(RuntimeError, match="realtime.mode"):
+        sync_config_files.build_runtime_addition_review(
+            [make_inventory_entry("realtime.mode")],
+            schema,
+            'sandbox_mode = "workspace-write"\n',
+        )
+
+
+def test_build_feature_comment_for_legacy_alias_includes_description_and_canonical_key() -> None:
+    rendered = shared.build_feature_comment(
+        "telepathy",
+        "UnderDevelopment",
+        False,
+        {},
+        legacy=True,
+        description="Enable the Chronicle sidecar for passive screen-context memories.",
+        canonical_key="chronicle",
     )
 
-    assert not review.added_safe_defaults
-    assert not review.skipped
-    assert len(review.added_exemplars) == 1
-    assert review.added_exemplars[0].path == "realtime.mode"
-    assert "comment-only stub" in review.added_exemplars[0].review_note
-
-    proposed = sync_config_files.apply_runtime_addition_review(
-        'sandbox_mode = "workspace-write"\n',
-        review,
-    )
-
-    assert "[realtime]" in proposed
-    assert "# Example values added by codex-deltas; review and configure before applying." in proposed
-    assert "# mode =  # string; comment-only review stub; configure manually; no safe default or exemplar available; new since comparison baseline" in proposed
+    assert (
+        "# bool; enable the Chronicle sidecar for passive screen-context memories.; "
+        "legacy alias for `[features].chronicle`."
+    ) in rendered
 
 
 def test_parse_active_keys_ignores_comment_text_when_reading_false() -> None:

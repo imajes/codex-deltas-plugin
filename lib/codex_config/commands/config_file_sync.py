@@ -77,6 +77,12 @@ EXEMPLAR_BLOCK_COMMENT = (
 )
 MARKETPLACE_EXAMPLE_SOURCE = "https://example.invalid/example-marketplace.git"
 MISSING_DEFAULT = object()
+PATH_DESCRIPTION_OVERRIDES = {
+    "realtime.transport": "Transport used for realtime conversations.",
+    "realtime.type": "Session mode used for realtime conversations.",
+    "realtime.version": "Protocol version used for realtime conversations.",
+    "realtime.voice": "Voice used for realtime conversations.",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -189,6 +195,7 @@ def make_feature_body(
             spec.default_enabled,
             comment_lookup,
             new_since=new_since,
+            description=spec.description,
         )
         if spec.key in PLATFORM_FEATURE_KEYS:
             platform_lines.append((spec.key, rendered))
@@ -204,6 +211,8 @@ def make_feature_body(
             canonical_spec.default_enabled,
             comment_lookup,
             legacy=True,
+            description=canonical_spec.description,
+            canonical_key=canonical,
         )
         if canonical_is_platform:
             platform_lines.append((legacy_key, rendered))
@@ -218,6 +227,7 @@ def make_feature_body(
             comment_lookup,
             legacy=True,
             legacy_reason="deprecated canonical feature; avoid new use.",
+            description=spec.description,
         )
         if spec.key in PLATFORM_FEATURE_KEYS:
             platform_lines.append((spec.key, rendered))
@@ -580,6 +590,22 @@ def new_since_label(entry: dict[str, Any]) -> str:
     return ""
 
 
+def resolve_meaningful_description(
+    entry: dict[str, Any],
+    node: dict[str, Any] | None,
+    *,
+    description_override: str | None = None,
+) -> str:
+    description = description_override or str(entry.get("description") or "").strip()
+    if not description:
+        description = PATH_DESCRIPTION_OVERRIDES.get(str(entry.get("path", "")), "")
+    if not description:
+        description = summarize_schema_description(node or {})
+    if not description:
+        raise RuntimeError(f"no meaningful description could be derived for `{entry['path']}`")
+    return description
+
+
 def format_runtime_comment(
     entry: dict[str, Any],
     node: dict[str, Any] | None,
@@ -593,9 +619,13 @@ def format_runtime_comment(
         detail_parts.append("proposed safe default")
     else:
         detail_parts.append("example value; review before applying")
-    description = description_override or summarize_schema_description(schema_node)
-    if description:
-        detail_parts.append(description)
+    detail_parts.append(
+        resolve_meaningful_description(
+            entry,
+            schema_node,
+            description_override=description_override,
+        )
+    )
     new_since = new_since_label(entry)
     if new_since:
         detail_parts.append(new_since)
@@ -732,9 +762,7 @@ def make_comment_stub_record(
         "configure manually",
         reason,
     ]
-    description = summarize_schema_description(schema_node)
-    if description:
-        comment_parts.append(description)
+    comment_parts.append(resolve_meaningful_description(entry, schema_node))
     new_since = new_since_label(entry)
     if new_since:
         comment_parts.append(new_since)
@@ -773,10 +801,12 @@ def build_object_exemplar_record(
     for key_name in sorted(properties):
         child_node = normalize_schema_node(schema, properties[key_name])
         child_path = f"{exemplar_prefix}.{key_name}"
+        child_entry = dict(entry)
+        child_entry["path"] = child_path
         default_value = child_node.get("default", MISSING_DEFAULT)
         if default_value is not MISSING_DEFAULT and default_value is not None and child_node.get("type") != "object":
             record = make_assignment_record(
-                entry,
+                child_entry,
                 child_path,
                 child_node,
                 default_value,
@@ -789,7 +819,7 @@ def build_object_exemplar_record(
         placeholder = placeholder_value_for_schema(child_path, child_node)
         if placeholder is not None:
             record = make_assignment_record(
-                entry,
+                child_entry,
                 child_path,
                 child_node,
                 placeholder,
@@ -800,8 +830,9 @@ def build_object_exemplar_record(
             continue
 
         child_type = schema_type_label(child_node)
+        child_description = resolve_meaningful_description({"path": child_path}, child_node)
         comment_only_lines.append(
-            f"# configure `{key_name}` ({child_type}) manually; no safe exemplar could be derived"
+            f"# configure `{key_name}` ({child_type}) manually; {child_description}; no safe exemplar could be derived"
         )
 
     if not rendered_lines and not comment_only_lines:
@@ -856,7 +887,6 @@ def build_runtime_addition_review(
                 {"type": "boolean"},
                 entry["default_value"],
                 status="safe-default",
-                description_override="feature default from the current feature registry",
             )
             if record is not None:
                 safe_defaults.append(record)
@@ -864,25 +894,7 @@ def build_runtime_addition_review(
 
         schema_node = lookup_schema_node(schema, path)
         if schema_node is None:
-            if is_new_entry:
-                exemplars.append(
-                    make_comment_stub_record(
-                        entry,
-                        path,
-                        None,
-                        reason="no current schema metadata was available",
-                    )
-                )
-            else:
-                skipped.append(
-                    RuntimeAdditionRecord(
-                        path=path,
-                        status="skipped",
-                        detail="no current schema metadata was available for this key",
-                        review_note="Skipped because no schema metadata was available to derive a safe default or exemplar.",
-                    )
-                )
-            continue
+            raise RuntimeError(f"no current schema metadata was available for `{path}`")
 
         default_value = schema_node.get("default", MISSING_DEFAULT)
         if default_value is not MISSING_DEFAULT and default_value is not None and schema_node.get("type") != "object":

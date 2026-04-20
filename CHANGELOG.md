@@ -6,6 +6,39 @@ This repository does not yet use annotated release tags, so the version sections
 below are reconstructed from the committed version metadata and the actual git
 history in this repo.
 
+## [0.5.0] - 2026-04-20
+
+This release tightens config comment synthesis so generated config guidance is
+actually informative: feature flags now carry source-backed descriptions,
+legacy aliases name the preferred canonical key, and unresolved meanings stop
+the run instead of silently degrading to boilerplate.
+
+### Changed
+
+- Parsed feature descriptions directly from `codex-rs/features/src/lib.rs` and
+  threaded them through config lifecycle inventory, clean config synthesis, and
+  runtime proposal generation.
+- Replaced the generic feature-registry comment fallback with semantic
+  descriptions derived from current code, while still preserving meaningful
+  existing inline comments in `config-CLEAN.toml`.
+- Strengthened runtime proposal synthesis so generated additions must have a
+  meaningful description from schema metadata, curated source-backed overrides,
+  or feature-registry semantics.
+- Changed unresolved comment generation from a placeholder path into a hard
+  failure, so ambiguous additions are surfaced as workflow errors rather than
+  misleading prose.
+- Updated the config workflow docs to require meaningful descriptions and
+  explicit canonical keys for legacy feature aliases.
+- Bumped the plugin/package metadata to `0.5.0` in both packaging and plugin
+  manifest surfaces.
+
+### Tests
+
+- Extended the runtime sync suite to cover:
+  - source-backed feature descriptions in runtime additions
+  - legacy feature comments naming the canonical replacement
+  - failure when no meaningful description can be derived
+
 ## [0.4.0] - 2026-04-20
 
 This release tightens the plugin instructions around how the delta workflow is

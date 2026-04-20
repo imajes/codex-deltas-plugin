@@ -44,6 +44,7 @@ def build_feature_entries(
     from_sha: str | None,
 ) -> list[InventoryEntry]:
     entries: list[InventoryEntry] = []
+    specs_by_key = {spec.key: spec for spec in specs}
     for spec in specs:
         classification = "active"
         clean_policy = "active"
@@ -81,9 +82,11 @@ def build_feature_entries(
                     "use_linux_sandbox_bwrap",
                 },
                 is_new=classification == "new",
+                description=spec.description,
             )
         )
     for legacy_key, canonical in sorted(aliases.items()):
+        canonical_spec = specs_by_key[canonical]
         entries.append(
             InventoryEntry(
                 path=f"features.{legacy_key}",
@@ -94,6 +97,8 @@ def build_feature_entries(
                 runtime_policy="remove",
                 note=f"Legacy feature alias for `[features].{canonical}`.",
                 migration_target=f"features.{canonical}",
+                description=canonical_spec.description,
+                canonical_key=canonical,
             )
         )
     return entries

@@ -37,6 +37,8 @@ Classify Codex config keys before touching either config file. This skill owns n
 - Deprecated canonical feature keys should be treated as `legacy`, not as fresh active toggles.
 - Schema-modeled dynamic keys stay `active` even when their concrete paths are discovered through runtime structure.
 - Do not blanket-classify `permissions.<profile>.network.*` as `pre-schema`; those keys may be covered by schema-driven dynamic sections.
+- Feature inventory entries must carry a meaningful, source-backed description from current code.
+- Legacy feature aliases must carry the preferred canonical key so downstream comment generation can name the migration target explicitly.
 
 ## Script
 

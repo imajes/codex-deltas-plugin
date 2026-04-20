@@ -30,6 +30,12 @@ Use the skill docs as the workflow playbooks for this plugin. They define lane
 ordering, report structure, and artifact expectations; the actual helper
 commands are still run directly through the normal `uv run ...` command surface.
 
+For config maintenance, generated comments are expected to be source-backed.
+Feature flags should describe what the feature does, legacy aliases should name
+the preferred canonical key, and synthesis should fail rather than emit generic
+placeholder prose when the meaning cannot be derived from current schema or
+current code.
+
 For changelog runs, the canonical folders are:
 
 - automation root: supplied via `CODEX_DELTAS_AUTOMATION_ROOT`, `CODEX_AUTOMATION_ROOT`, or `--automation-root`

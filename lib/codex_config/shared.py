@@ -85,6 +85,14 @@ ROOT_PINNED_COMMENT = (
 NEW_SINCE_RE = re.compile(r"New canonical feature key since (?P<sha>[0-9a-f]{7,40})")
 FEATURE_ENTRY_START = "FeatureSpec {"
 DEFAULT_REPO_URL = "https://github.com/openai/codex.git"
+GENERIC_FEATURE_COMMENTS = {
+    "bool; feature toggle.",
+    "bool; experimental feature toggle.",
+    "bool; under-development feature toggle.",
+    "bool; deprecated feature toggle.",
+    "bool; removed feature toggle.",
+    "legacy alias; prefer canonical feature key.",
+}
 
 
 @dataclass(frozen=True)
@@ -93,6 +101,7 @@ class FeatureSpecRecord:
     key: str
     stage: str
     default_enabled: bool
+    description: str
 
 
 @dataclass
@@ -107,6 +116,8 @@ class InventoryEntry:
     migration_target: str | None = None
     is_new: bool = False
     platform_specific: bool = False
+    description: str | None = None
+    canonical_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -447,21 +458,84 @@ def extract_feature_spec_blocks(text: str) -> list[str]:
     return blocks
 
 
+def extract_enum_body(text: str, enum_name: str) -> str:
+    anchor = f"pub enum {enum_name} {{"
+    start = text.find(anchor)
+    if start == -1:
+        raise RuntimeError(f"failed to locate enum `{enum_name}`")
+    position = start + len(anchor)
+    depth = 1
+    body_start = position
+    while position < len(text):
+        char = text[position]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[body_start:position]
+        position += 1
+    raise RuntimeError(f"unterminated enum `{enum_name}`")
+
+
+def normalize_doc_sentence(text: str) -> str:
+    normalized = " ".join(text.split()).strip()
+    if not normalized:
+        return ""
+    sentence = re.split(r"(?<=[.!?])\s+", normalized, maxsplit=1)[0].strip()
+    if len(sentence) >= 2 and sentence[0].isalpha() and sentence[1].islower():
+        sentence = sentence[0].lower() + sentence[1:]
+    if sentence and sentence[-1] not in ".!?":
+        sentence += "."
+    return sentence
+
+
+def parse_feature_descriptions(text: str) -> dict[str, str]:
+    body = extract_enum_body(text, "Feature")
+    descriptions: dict[str, str] = {}
+    pending_docs: list[str] = []
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if line.startswith("///"):
+            pending_docs.append(line[3:].strip())
+            continue
+        variant_match = re.match(r"^(?P<name>[A-Z][A-Za-z0-9_]*)\s*,\s*$", line)
+        if variant_match:
+            name = variant_match.group("name")
+            description = normalize_doc_sentence(" ".join(pending_docs))
+            if not description:
+                raise RuntimeError(f"missing doc comment for Feature::{name}")
+            descriptions[name] = description
+            pending_docs = []
+            continue
+        if line and not line.startswith("//"):
+            pending_docs = []
+    if not descriptions:
+        raise RuntimeError("failed to parse any feature descriptions")
+    return descriptions
+
+
 def parse_feature_specs(text: str) -> list[FeatureSpecRecord]:
+    descriptions = parse_feature_descriptions(text)
     specs: list[FeatureSpecRecord] = []
     for block in extract_feature_spec_blocks(text):
         id_match = re.search(r"id:\s*Feature::(?P<id>\w+),", block)
         key_match = re.search(r'key:\s*"(?P<key>[^"]+)",', block)
         if not (id_match and key_match):
             raise RuntimeError(f"failed to parse FeatureSpec block:\n{block}")
+        feature_id = id_match.group("id")
+        description = descriptions.get(feature_id)
+        if not description:
+            raise RuntimeError(f"missing parsed description for Feature::{feature_id}")
         stage_expression = extract_field_expression(block, "stage")
         default_expression = extract_field_expression(block, "default_enabled")
         specs.append(
             FeatureSpecRecord(
-                id_name=id_match.group("id"),
+                id_name=feature_id,
                 key=key_match.group("key"),
                 stage=resolve_stage_kind(stage_expression),
                 default_enabled=evaluate_boolean_expression(default_expression),
+                description=description,
             )
         )
     if not specs:
@@ -1101,11 +1175,23 @@ def build_feature_comment(
     legacy: bool = False,
     legacy_reason: str | None = None,
     new_since: str | None = None,
+    description: str | None = None,
+    canonical_key: str | None = None,
 ) -> str:
-    base = comment_lookup.get(key, FEATURE_COMMENT_FALLBACK.get(stage, "bool; feature toggle."))
+    lookup_comment = comment_lookup.get(key)
+    if lookup_comment in GENERIC_FEATURE_COMMENTS:
+        lookup_comment = None
+    normalized_description = normalize_doc_sentence(description or "") if description else ""
+    base = lookup_comment or (f"bool; {normalized_description}" if normalized_description else None)
+    if not base:
+        raise RuntimeError(f"missing meaningful feature description for `[features].{key}` ({stage})")
     if legacy:
-        suffix = legacy_reason or "legacy alias; prefer canonical feature key."
-        return f"# {key} = {'true' if default_enabled else 'false'}".ljust(120) + f"# {suffix}"
+        suffix = legacy_reason
+        if canonical_key:
+            suffix = f"legacy alias for `[features].{canonical_key}`."
+        if suffix:
+            return f"# {key} = {'true' if default_enabled else 'false'}".ljust(120) + f"# {base}; {suffix}"
+        return f"# {key} = {'true' if default_enabled else 'false'}".ljust(120) + f"# {base}"
     if new_since:
         return f"{key} = {'true' if default_enabled else 'false'}".ljust(120) + f"# {base} # new since {new_since}"
     return f"{key} = {'true' if default_enabled else 'false'}".ljust(120) + f"# {base}"
