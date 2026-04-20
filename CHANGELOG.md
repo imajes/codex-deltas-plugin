@@ -6,6 +6,43 @@ This repository does not yet use annotated release tags, so the version sections
 below are reconstructed from the committed version metadata and the actual git
 history in this repo.
 
+## [0.5.1] - 2026-04-20
+
+This release hardens config sync after the 0.5.0 comment-generation changes so
+the workflow can keep moving when it encounters real-world runtime shapes such
+as pre-schema keys, quoted TOML keys, and schema-modeled dynamic paths without
+inline descriptions.
+
+### Fixed
+
+- Fixed runtime addition synthesis so `pre-schema` paths without a current
+  schema node now surface as comment-only review stubs instead of aborting the
+  entire config lane.
+- Fixed keyed-path detection for quoted TOML keys, allowing existing settings
+  such as quoted notice migration acknowledgements to be recognized before
+  proposing duplicates.
+- Fixed description fallback for schema-visible and schema-modeled dynamic keys
+  by deriving concrete runtime comments from lifecycle notes when the schema
+  itself does not carry a useful `description`.
+
+### Changed
+
+- Clarified the config workflow skill docs so source-backed feature
+  descriptions may be lightly editorialized when the literal source wording is
+  too terse to be useful as a config comment.
+- Tightened validation guidance so editorialized comments must remain faithful
+  to current code and schema semantics, and tautological “technically correct”
+  comments can be treated as invalid output.
+- Bumped the plugin/package metadata to `0.5.1` in packaging, plugin manifest,
+  and lockfile surfaces.
+
+### Tests
+
+- Extended `tests/test_runtime_sync.py` with regression coverage for:
+  - pre-schema comment-only runtime stubs
+  - quoted dotted-key detection
+  - schema fallback descriptions for dynamic keys
+
 ## [0.5.0] - 2026-04-20
 
 This release tightens config comment synthesis so generated config guidance is
