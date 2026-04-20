@@ -601,6 +601,14 @@ def resolve_meaningful_description(
         description = PATH_DESCRIPTION_OVERRIDES.get(str(entry.get("path", "")), "")
     if not description:
         description = summarize_schema_description(node or {})
+    note = str(entry.get("note") or "").strip()
+    if not description and entry.get("classification") == "pre-schema":
+        description = note
+    if not description and entry.get("source") == "schema":
+        if note == "Schema-modeled dynamic key.":
+            description = f"schema-defined dynamic setting for `{entry['path']}`"
+        elif note == "Schema-visible current key.":
+            description = f"schema-defined setting for `{entry['path']}`"
     if not description:
         raise RuntimeError(f"no meaningful description could be derived for `{entry['path']}`")
     return description
@@ -894,6 +902,16 @@ def build_runtime_addition_review(
 
         schema_node = lookup_schema_node(schema, path)
         if schema_node is None:
+            if entry.get("classification") == "pre-schema":
+                exemplars.append(
+                    make_comment_stub_record(
+                        entry,
+                        path,
+                        None,
+                        reason="not yet modeled in current schema",
+                    )
+                )
+                continue
             raise RuntimeError(f"no current schema metadata was available for `{path}`")
 
         default_value = schema_node.get("default", MISSING_DEFAULT)

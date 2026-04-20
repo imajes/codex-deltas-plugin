@@ -38,6 +38,8 @@ Classify Codex config keys before touching either config file. This skill owns n
 - Schema-modeled dynamic keys stay `active` even when their concrete paths are discovered through runtime structure.
 - Do not blanket-classify `permissions.<profile>.network.*` as `pre-schema`; those keys may be covered by schema-driven dynamic sections.
 - Feature inventory entries must carry a meaningful, source-backed description from current code.
+- If a source-backed feature description is technically correct but too terse to stand alone as a useful config comment, record enough nearby current-code context to support a light editorial expansion later.
+- Any editorial expansion must stay faithful to current code semantics: clarify shorthand or tautologies, but do not invent capabilities, defaults, rollout state, or product claims that are not supported by current source.
 - Legacy feature aliases must carry the preferred canonical key so downstream comment generation can name the migration target explicitly.
 
 ## Script

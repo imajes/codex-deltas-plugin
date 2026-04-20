@@ -24,8 +24,8 @@ LEGACY_ALIAS_RE = re.compile(
     re.S,
 )
 SECTION_RE = re.compile(r"^\s*\[(?P<header>[^\]]+)\]\s*(?:#.*)?$")
-KEY_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
-COMMENTED_KEY_RE = re.compile(r"^\s*#\s*([A-Za-z0-9_-]+)\s*=")
+KEY_RE = re.compile(r'^\s*(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_-]+))\s*=')
+COMMENTED_KEY_RE = re.compile(r'^\s*#\s*(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_-]+))\s*=')
 
 SECTION_LINK_PREFIXES = ("# Section link:", "# Section links:")
 HEADER_COMMENT_PREFIXES = SECTION_LINK_PREFIXES + (
@@ -707,10 +707,10 @@ def flatten_toml_paths(path: Path) -> set[str]:
 def parse_key_name(line: str) -> str | None:
     match = KEY_RE.match(line)
     if match:
-        return match.group(1)
+        return next((group for group in match.groups() if group is not None), None)
     match = COMMENTED_KEY_RE.match(line)
     if match:
-        return match.group(1)
+        return next((group for group in match.groups() if group is not None), None)
     return None
 
 

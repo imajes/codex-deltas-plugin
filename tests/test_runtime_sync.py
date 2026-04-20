@@ -568,6 +568,121 @@ def test_runtime_additions_fail_when_no_meaningful_description_can_be_derived() 
         )
 
 
+def test_runtime_additions_pre_schema_without_schema_metadata_become_comment_stub() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "apps": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                    },
+                },
+            }
+        },
+    }
+
+    review = sync_config_files.build_runtime_addition_review(
+        [
+            make_inventory_entry(
+                "apps.example_connector.disabled_reason",
+                classification="pre-schema",
+                source="code",
+                note="Code-visible app disable reason marker not yet modeled in config schema.",
+            )
+        ],
+        schema,
+        'sandbox_mode = "workspace-write"\n',
+    )
+
+    assert [item.path for item in review.added_exemplars] == [
+        "apps.example_connector.disabled_reason",
+    ]
+    assert (
+        "Code-visible app disable reason marker not yet modeled in config schema."
+        in review.added_exemplars[0].detail
+    )
+    assert review.added_exemplars[0].rendered_lines == [
+        "# disabled_reason =  # value; comment-only review stub; configure manually; "
+        "not yet modeled in current schema; Code-visible app disable reason marker not yet modeled in config schema."
+    ]
+
+
+def test_runtime_additions_skip_existing_quoted_dotted_key() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "notice": {
+                "type": "object",
+                "properties": {
+                    "hide_gpt-5.1-codex-max_migration_prompt": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "ack gpt-5.1-codex-max migration prompt.",
+                    }
+                },
+            }
+        },
+    }
+
+    review = sync_config_files.build_runtime_addition_review(
+        [
+            make_inventory_entry(
+                "notice.hide_gpt-5.1-codex-max_migration_prompt",
+                classification="active",
+                note="Schema-visible current key.",
+            )
+        ],
+        schema,
+        '[notice]\n"hide_gpt-5.1-codex-max_migration_prompt" = true\n',
+    )
+
+    assert review.added_safe_defaults == []
+    assert review.added_exemplars == []
+    assert review.skipped == []
+
+
+def test_runtime_additions_dynamic_schema_key_without_description_uses_schema_fallback() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "plugins": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                        }
+                    },
+                },
+            }
+        },
+    }
+
+    review = sync_config_files.build_runtime_addition_review(
+        [
+            make_inventory_entry(
+                "plugins.example.enabled",
+                classification="active",
+                source="schema",
+                note="Schema-modeled dynamic key.",
+            )
+        ],
+        schema,
+        'sandbox_mode = "workspace-write"\n',
+    )
+
+    assert [item.path for item in review.added_safe_defaults] == ["plugins.example.enabled"]
+    assert (
+        "schema-defined dynamic setting for `plugins.example.enabled`"
+        in review.added_safe_defaults[0].detail
+    )
+
+
 def test_build_feature_comment_for_legacy_alias_includes_description_and_canonical_key() -> None:
     rendered = shared.build_feature_comment(
         "telepathy",

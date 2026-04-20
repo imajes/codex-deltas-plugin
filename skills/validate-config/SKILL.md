@@ -19,8 +19,10 @@ Validate generated config artifacts. This skill owns policy checks only.
 2. Validate ordering, section comments, and TOML parseability.
 3. In full mode, validate feature defaults, removed keys, legacy keys, and runtime permission-shape migrations.
 4. Reject generated comments that fall back to generic boilerplate instead of meaningful descriptions.
-5. Reject legacy feature comments that omit the preferred canonical key.
-6. Emit one markdown validation summary under `$CODEX_HOME/config/deltas/...`.
+5. Reject comments that are source-backed but still tautological or too terse to be useful when a conservative current-code expansion was available.
+6. Reject editorialized comments that add claims not supported by current schema metadata, current code, or current feature-registry context.
+7. Reject legacy feature comments that omit the preferred canonical key.
+8. Emit one markdown validation summary under `$CODEX_HOME/config/deltas/...`.
 
 ## Script
 

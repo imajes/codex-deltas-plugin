@@ -21,7 +21,9 @@ Rewrite the clean baseline and proposed runtime config from a lifecycle inventor
 4. Keep deprecated/legacy keys commented in clean and absent from runtime proposals.
 5. Hand the outputs to `[$codex-deltas:validate-config](../validate-config/SKILL.md)`.
 6. Emit meaningful comments for generated additions and feature flags; do not preserve or invent boilerplate descriptions.
-7. If a generated comment cannot be backed by current schema metadata or current code semantics, fail the run instead of emitting a placeholder.
+7. When the current source description is too terse to be useful on its own, lightly editorialize it into a more concrete config comment using nearby current-code context only.
+8. Keep editorialization conservative: clarify what the setting affects, but do not add unsupported behavior, marketing phrasing, or guesses about future intent.
+9. If a generated comment cannot be backed by current schema metadata or current code semantics, fail the run instead of emitting a placeholder.
 
 ## Scripts
 
