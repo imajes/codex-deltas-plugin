@@ -26,9 +26,11 @@ Write the final Codex delta report from the persisted lane artifacts.
 ## Workflow
 
 1. Read the persisted artifacts before re-querying git or config files.
-2. Keep nuanced interpretation in the report text, especially for dynamic config structures and migration intent.
-3. Write the final markdown to the report path recorded in `run-context.json`.
-4. Print the same report substance in the conversation.
+2. Write the report directly in the model from those artifacts; this lane does not require a dedicated helper command.
+3. Keep nuanced interpretation in the report text, especially for dynamic config structures and migration intent.
+4. Preserve the documented section order and heading text exactly so recurring reports remain comparable.
+5. Write the final markdown to the report path recorded in `run-context.json`.
+6. Print the same report substance in the conversation.
 
 ## Report sections
 
@@ -42,3 +44,10 @@ Write the final Codex delta report from the persisted lane artifacts.
 - `## Proposed Config Patch (Current vs Proposed)`
 - `## No-Change Note` only when the range is empty
 - `## Failure` only when the run fails
+
+## Writing Expectations
+
+- Treat `config-orchestration-summary.md` and `validation.md` as the primary config narrative inputs.
+- Keep the baseline/runtime visibility diff clearly separate from the actionable proposed runtime patch.
+- Keep the prose stable enough that repeated runs read like the same report format, not a new essay each time.
+- If config validation failed, keep the failure grounded in the recorded artifacts instead of improvising a fix narrative.

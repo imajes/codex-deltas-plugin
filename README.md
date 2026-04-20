@@ -26,6 +26,10 @@ The changelog automation stack for this plugin is split deliberately:
 - Leaf lane skills own range discovery, repo analysis, config analysis, config synthesis, config validation, report composition, and state updates.
 - `automations/changelog-template/automation.toml` is a prototype template for copying into a real automation root; plugin installation does not auto-register it.
 
+Use the skill docs as the workflow playbooks for this plugin. They define lane
+ordering, report structure, and artifact expectations; the actual helper
+commands are still run directly through the normal `uv run ...` command surface.
+
 For changelog runs, the canonical folders are:
 
 - automation root: supplied via `CODEX_DELTAS_AUTOMATION_ROOT`, `CODEX_AUTOMATION_ROOT`, or `--automation-root`

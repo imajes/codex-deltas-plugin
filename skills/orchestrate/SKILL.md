@@ -16,7 +16,7 @@ Run the full Codex delta workflow. This is the top-level plugin skill for automa
 ## Scope
 
 - This skill owns lane ordering, resume behavior, and final delivery.
-- This skill delegates config-specific work to `[$codex-deltas:orchestrate-config](../orchestrate-config/SKILL.md)`.
+- Follow `[$codex-deltas:orchestrate-config](../orchestrate-config/SKILL.md)` for the config-specific subworkflow.
 - This skill keeps nuanced interpretation in the model instead of forcing every edge case into Python heuristics.
 
 ## Operating paths
@@ -33,14 +33,14 @@ Run the full Codex delta workflow. This is the top-level plugin skill for automa
 2. If `run-context.json` says the range is empty, emit a short no-change report and then run `[$codex-deltas:update-state](../update-state/SKILL.md)` in success mode.
 3. Run `[$codex-deltas:analyze-repo](../analyze-repo/SKILL.md)` to persist `repo-findings.json`.
 4. Run `[$codex-deltas:orchestrate-config](../orchestrate-config/SKILL.md)` to produce config findings, synthesized config artifacts, and validation results.
-5. Run `[$codex-deltas:compose-report](../compose-report/SKILL.md)` to create the final report from the persisted artifacts.
+5. Follow `[$codex-deltas:compose-report](../compose-report/SKILL.md)` to write the final report directly from the persisted artifacts.
 6. Run `[$codex-deltas:update-state](../update-state/SKILL.md)` to write the compact automation memory after a successful report.
 
 ## Resume rules
 
 - Prefer rerunning the smallest lane that answers the current question.
 - If the range is already correct and only config logic changed, reuse `run-context.json` and rerun `[$codex-deltas:orchestrate-config](../orchestrate-config/SKILL.md)`.
-- If only the final writeup changed, reuse the existing artifacts and rerun `[$codex-deltas:compose-report](../compose-report/SKILL.md)`.
+- If only the final writeup changed, reuse the existing artifacts and rerun `[$codex-deltas:compose-report](../compose-report/SKILL.md)` by rereading those artifacts and rewriting the report.
 - If only the compact memory note changed, rerun `[$codex-deltas:update-state](../update-state/SKILL.md)` without redoing the earlier lanes.
 
 ## Report contract
@@ -69,6 +69,8 @@ Required details:
 - Keep the final report grounded in the actual range and generated artifacts.
 - Keep nuance-sensitive config interpretation in the skill reasoning, not in ad hoc rule invention.
 - Summarize user-facing changes, config evolution, API/library/internal changes, and breaking or behavioral risks.
+- Preserve the documented section order and heading text so recurring reports stay comparable across runs.
+- When writing the report, rely on the persisted artifacts as the source of truth instead of inventing a new lane or waiting for a dedicated report command.
 - Ignore CI-only and test-only churn unless it changes user-visible behavior.
 - Use GitHub MCP as needed for PR metadata.
 

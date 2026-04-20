@@ -9,6 +9,7 @@
 - Update the mirror before determining `to`. If mirror update fails, stop immediately and produce a failure-only report.
 - Prefer persisted lane handoffs over recomputing earlier stages.
 - Treat `[$codex-deltas:orchestrate-config](../orchestrate-config/SKILL.md)` as the config subworkflow.
+- Treat `[$codex-deltas:compose-report](../compose-report/SKILL.md)` as a report-writing playbook: read the persisted artifacts and write the report directly rather than looking for a dedicated compose command.
 - For non-empty ranges, consume config artifacts in this order:
   1. `config-orchestration-summary.md`
   2. `validation.md`
@@ -33,6 +34,7 @@
   - include `from`, `to`, and commit count
   - include classification summary exactly as `new: N, pre-schema: N, legacy: N, removed: N`
   - clearly distinguish visibility diff versus actionable proposed patch diff
+  - preserve the documented section order and heading text for recurring report consistency
   - print the full Markdown report in the conversation
   - save the same substance to `$CODEX_HOME/config/deltas/<to_short_sha>/repo-delta-<from_short_sha>.md`
 - On full success, compact automation memory to:

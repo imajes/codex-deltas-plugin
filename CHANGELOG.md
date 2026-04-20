@@ -6,6 +6,33 @@ This repository does not yet use annotated release tags, so the version sections
 below are reconstructed from the committed version metadata and the actual git
 history in this repo.
 
+## [0.4.0] - 2026-04-20
+
+This release tightens the plugin instructions around how the delta workflow is
+actually executed: use the skills as workflow playbooks, keep the report format
+stable across runs, and write the report directly from the persisted artifacts.
+
+### Changed
+
+- Clarified the top-level orchestration skill so config work is framed as a
+  subworkflow to follow, and report composition is framed as direct report
+  writing from persisted artifacts rather than a separate delegated lane.
+- Strengthened the compose-report skill with explicit writing expectations:
+  - preserve the documented section order and headings
+  - treat `config-orchestration-summary.md` and `validation.md` as the primary
+    config narrative inputs
+  - keep the baseline/runtime visibility diff separate from the actionable
+    proposed runtime patch
+- Updated the orchestration rules and README so the plugin more clearly
+  distinguishes between:
+  - skill-owned workflow structure
+  - direct execution of the documented `uv run ...` command surfaces
+- Reworded the changelog automation template prompt to say “read and follow”
+  the orchestration skill, and removed the misleading warning that implied the
+  command surface and the skill workflow were mutually exclusive.
+- Bumped the plugin/package metadata to `0.4.0` in both packaging and plugin
+  manifest surfaces.
+
 ## [0.3.0] - 2026-04-14
 
 This release changes runtime proposal synthesis so newly classified
