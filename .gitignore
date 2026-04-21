@@ -5,3 +5,4 @@ __pycache__/
 .pycache/
 .DS_Store
 *.egg-info/
+/scratch
