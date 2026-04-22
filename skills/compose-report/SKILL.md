@@ -48,6 +48,7 @@ Write the final Codex delta report from the persisted lane artifacts.
 ## Writing Expectations
 
 - Treat `config-orchestration-summary.md` and `validation.md` as the primary config narrative inputs.
+- Treat relocation entries as part of the top-line `legacy` count, but use the summary artifact's lifecycle and runtime-migration subsections to distinguish true removals, plain legacy aliases, and relocations.
 - Keep the baseline/runtime visibility diff clearly separate from the actionable proposed runtime patch.
 - Keep the prose stable enough that repeated runs read like the same report format, not a new essay each time.
 - If config validation failed, keep the failure grounded in the recorded artifacts instead of improvising a fix narrative.

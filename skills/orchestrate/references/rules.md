@@ -33,6 +33,7 @@
 - Required report details are:
   - include `from`, `to`, and commit count
   - include classification summary exactly as `new: N, pre-schema: N, legacy: N, removed: N`
+  - treat relocation entries as part of `legacy` for the count, then use `config-orchestration-summary.md` to separate true removals, plain legacy aliases, and relocations in the prose
   - clearly distinguish visibility diff versus actionable proposed patch diff
   - preserve the documented section order and heading text for recurring report consistency
   - print the full Markdown report in the conversation

@@ -27,7 +27,7 @@ Classify Codex config keys before touching either config file. This skill owns n
 - `active`: canonical key used by code today
 - `new`: active key that did not exist at the comparison SHA
 - `pre-schema`: code-visible key not represented in generated schema; prefer over omission when current code still reads the key
-- `legacy`: compatibility alias, deprecated canonical key, or deprecated shape kept for migration only
+- `legacy`: compatibility alias, deprecated canonical key, or deprecated shape kept for migration only. Proven relocations stay in this bucket and carry relocation metadata instead of inventing a new top-level class.
 - `removed`: no longer active in current code path
 
 ## Policy

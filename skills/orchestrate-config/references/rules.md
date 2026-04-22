@@ -10,6 +10,7 @@
 - Update the canonical `config-CLEAN.toml` only after validation passes.
 - Never overwrite the live `config.toml`; emit a proposed runtime file plus a patch diff instead.
 - Include a short classification summary in every markdown output for full-sync runs: `new`, `pre-schema`, `legacy`, `removed`.
+- Treat relocations as `legacy` in the top-line summary, then call them out separately in `config-orchestration-summary.md` so true removals, plain legacy aliases, and relocations are distinguishable downstream.
 - Full-sync modes require an explicit `from` SHA.
 - Stop the automation on mirror update failure; do not report stale ranges as authoritative.
 - Prefer a `layout-only` alpha-sort pass before introducing new keys when the clean file is structurally noisy.

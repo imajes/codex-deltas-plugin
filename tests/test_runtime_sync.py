@@ -38,6 +38,7 @@ def make_inventory_entry(
     description: str | None = None,
     canonical_key: str | None = None,
     migration_target: str | None = None,
+    migration_kind: str | None = None,
 ) -> dict[str, object]:
     return {
         "path": path,
@@ -48,6 +49,7 @@ def make_inventory_entry(
         "runtime_policy": runtime_policy,
         "note": note,
         "migration_target": migration_target,
+        "migration_kind": migration_kind,
         "is_new": classification == "new",
         "platform_specific": False,
         "description": description,
@@ -167,6 +169,84 @@ allowed_domains = ["example.com"]
     assert parsed["permissions"]["workspace"]["network"]["enabled"] is False
     assert parsed["permissions"]["workspace"]["network"]["proxy_url"] == "http://legacy-proxy"
     assert parsed["permissions"]["workspace"]["network"]["allowed_domains"] == ["example.com"]
+
+
+def test_apply_runtime_relocations_moves_flat_web_search_keys_into_location_block() -> None:
+    runtime_text = """
+sandbox_mode = "workspace-write"
+
+[tools.web_search]
+city = "Chicago"
+country = "US"
+""".strip() + "\n"
+
+    relocated, applied, conflicts = sync_config_files.apply_runtime_relocations(
+        runtime_text,
+        [
+            make_inventory_entry(
+                "tools.web_search.city",
+                classification="legacy",
+                runtime_policy="remove",
+                note="Legacy flat web-search location key; prefer nested `[tools.web_search.location]`.",
+                source="compatibility",
+                migration_target="tools.web_search.location.city",
+                migration_kind="relocation",
+            ),
+            make_inventory_entry(
+                "tools.web_search.country",
+                classification="legacy",
+                runtime_policy="remove",
+                note="Legacy flat web-search location key; prefer nested `[tools.web_search.location]`.",
+                source="compatibility",
+                migration_target="tools.web_search.location.country",
+                migration_kind="relocation",
+            ),
+        ],
+    )
+
+    parsed = tomlkit.parse(relocated)
+
+    assert conflicts == []
+    assert [item.path for item in applied] == [
+        "tools.web_search.city",
+        "tools.web_search.country",
+    ]
+    assert parsed["tools"]["web_search"]["location"]["city"] == "Chicago"
+    assert parsed["tools"]["web_search"]["location"]["country"] == "US"
+    assert "city" not in parsed["tools"]["web_search"]
+    assert "country" not in parsed["tools"]["web_search"]
+
+
+def test_apply_runtime_relocations_surfaces_conflicts_without_dropping_legacy_value() -> None:
+    runtime_text = """
+[tools.web_search]
+city = "Chicago"
+
+[tools.web_search.location]
+city = "Boston"
+""".strip() + "\n"
+
+    relocated, applied, conflicts = sync_config_files.apply_runtime_relocations(
+        runtime_text,
+        [
+            make_inventory_entry(
+                "tools.web_search.city",
+                classification="legacy",
+                runtime_policy="remove",
+                note="Legacy flat web-search location key; prefer nested `[tools.web_search.location]`.",
+                source="compatibility",
+                migration_target="tools.web_search.location.city",
+                migration_kind="relocation",
+            ),
+        ],
+    )
+
+    parsed = tomlkit.parse(relocated)
+
+    assert applied == []
+    assert [item.path for item in conflicts] == ["tools.web_search.city"]
+    assert parsed["tools"]["web_search"]["city"] == "Chicago"
+    assert parsed["tools"]["web_search"]["location"]["city"] == "Boston"
 
 
 def test_restore_missing_runtime_reference_blocks_keeps_comment_only_sections() -> None:
@@ -365,17 +445,73 @@ def test_classify_non_feature_key_marks_legacy_alias_with_migration_target() -> 
     assert decision.classification == "legacy"
     assert decision.source == "compatibility"
     assert decision.migration_target == "disable_on_external_context"
+    assert decision.migration_kind is None
     assert decision.runtime_policy == "remove"
 
 
-def test_classify_non_feature_key_marks_moved_web_search_location_key_as_legacy() -> None:
+def test_classify_non_feature_key_marks_moved_web_search_location_key_as_relocation() -> None:
+    current_schema = {
+        "type": "object",
+        "properties": {
+            "tools": {
+                "type": "object",
+                "properties": {
+                    "web_search": {
+                        "type": "object",
+                        "properties": {
+                            "location": {
+                                "type": "object",
+                                "properties": {
+                                    "city": {"type": "string"},
+                                },
+                            }
+                        },
+                    }
+                },
+            }
+        },
+    }
+    previous_schema = {
+        "type": "object",
+        "properties": {
+            "tools": {
+                "type": "object",
+                "properties": {
+                    "web_search": {
+                        "type": "object",
+                        "properties": {
+                            "city": {"type": "string"},
+                        },
+                    }
+                },
+            }
+        },
+    }
+    schema_paths, schema_dynamic_patterns = shared.build_schema_path_index(current_schema)
     decision = shared.classify_non_feature_key(
         "tools.web_search.city",
         [],
+        current_schema=current_schema,
+        current_schema_paths=schema_paths,
+        current_schema_dynamic_patterns=schema_dynamic_patterns,
+        previous_schema=previous_schema,
     )
 
     assert decision.classification == "legacy"
     assert decision.migration_target == "tools.web_search.location.city"
+    assert decision.migration_kind == "relocation"
+    assert decision.runtime_policy == "remove"
+
+
+def test_classify_non_feature_key_keeps_true_removed_key_without_relocation_metadata() -> None:
+    decision = shared.classify_non_feature_key(
+        "memories.phase_1_model",
+        [],
+    )
+
+    assert decision.classification == "removed"
+    assert decision.migration_target is None
+    assert decision.migration_kind is None
     assert decision.runtime_policy == "remove"
 
 
@@ -450,6 +586,7 @@ def test_build_non_feature_entries_keeps_schema_modeled_network_keys_active() ->
 
     schema_paths, schema_dynamic_patterns = shared.build_schema_path_index(schema)
     entries = classify_config_keys.build_non_feature_entries(
+        schema,
         schema_paths,
         schema_dynamic_patterns,
         set(),
@@ -457,6 +594,7 @@ def test_build_non_feature_entries_keeps_schema_modeled_network_keys_active() ->
             "permissions.workspace.network.enabled",
             "permissions.workspace.network.allowed_domains",
         },
+        None,
         set(),
         [],
         [
@@ -502,10 +640,12 @@ def test_build_non_feature_entries_marks_dynamic_schema_paths_active() -> None:
 
     schema_paths, schema_dynamic_patterns = shared.build_schema_path_index(schema)
     entries = classify_config_keys.build_non_feature_entries(
+        schema,
         schema_paths,
         schema_dynamic_patterns,
         set(),
         {"agents.default.config_file", "agents.explorer.description"},
+        None,
         set(),
         [],
         [],
@@ -538,6 +678,7 @@ def test_build_non_feature_entries_keeps_dynamic_notice_migration_entries_active
 
     schema_paths, schema_dynamic_patterns = shared.build_schema_path_index(schema)
     entries = classify_config_keys.build_non_feature_entries(
+        schema,
         schema_paths,
         schema_dynamic_patterns,
         set(),
@@ -545,6 +686,7 @@ def test_build_non_feature_entries_keeps_dynamic_notice_migration_entries_active
             "notice.model_migrations.gpt-5.2",
             "notice.model_migrations.gpt-5.2-codex",
         },
+        None,
         set(),
         [],
         [],
@@ -572,6 +714,40 @@ enabled = true
         'runtime proposal must set `default_permissions = "workspace"`',
         "runtime proposal still uses [permissions.network]",
     ]
+
+
+def test_validate_allows_runtime_relocation_conflict_for_manual_review(tmp_path: Path) -> None:
+    runtime_path = tmp_path / "config.toml"
+    runtime_path.write_text(
+        """
+[tools.web_search]
+city = "Chicago"
+
+[tools.web_search.location]
+city = "Boston"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    parsed_runtime = shared.toml_loads(runtime_path.read_text(encoding="utf-8"))
+    runtime_active_paths = validate_config_sync.flatten_active_toml_paths(runtime_path)
+    entry = shared.InventoryEntry(
+        path="tools.web_search.city",
+        classification="legacy",
+        source="compatibility",
+        default_value=None,
+        clean_policy="commented",
+        runtime_policy="remove",
+        note="Legacy flat web-search location key; prefer nested `[tools.web_search.location]`.",
+        migration_target="tools.web_search.location.city",
+        migration_kind="relocation",
+    )
+
+    assert validate_config_sync.is_allowed_relocation_conflict(
+        entry,
+        parsed_runtime,
+        runtime_active_paths,
+    )
 
 
 def test_runtime_additions_preserve_removals_and_add_safe_defaults_and_exemplars() -> None:
@@ -1079,7 +1255,7 @@ def test_run_config_maintenance_writes_summary_artifacts_on_classify_failure(
     assert "classification exploded" in summary_text
 
 
-def test_run_config_maintenance_summary_includes_runtime_additions_review_section(
+def test_run_config_maintenance_summary_includes_relocation_and_runtime_review_sections(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1135,7 +1311,40 @@ def test_run_config_maintenance_summary_includes_runtime_additions_review_sectio
             output_path = Path(command[command.index("--output") + 1])
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(
-                '{"summary":{"new":3,"pre-schema":0,"legacy":0,"removed":0},"entries":[]}',
+                json.dumps(
+                    {
+                        "summary": {"new": 3, "pre-schema": 0, "legacy": 2, "removed": 1},
+                        "entries": [
+                            make_inventory_entry(
+                                "memories.phase_1_model",
+                                classification="removed",
+                                runtime_policy="remove",
+                                clean_policy="omit",
+                                note="Removed from current config model; should not stay in either file.",
+                                source="compatibility",
+                            ),
+                            make_inventory_entry(
+                                "no_memories_if_mcp_or_web_search",
+                                classification="legacy",
+                                runtime_policy="remove",
+                                clean_policy="commented",
+                                note="Legacy compatibility alias; prefer `disable_on_external_context`.",
+                                source="compatibility",
+                                migration_target="disable_on_external_context",
+                            ),
+                            make_inventory_entry(
+                                "tools.web_search.city",
+                                classification="legacy",
+                                runtime_policy="remove",
+                                clean_policy="commented",
+                                note="Legacy flat web-search location key; prefer nested `[tools.web_search.location]`.",
+                                source="compatibility",
+                                migration_target="tools.web_search.location.city",
+                                migration_kind="relocation",
+                            ),
+                        ],
+                    }
+                ),
                 encoding="utf-8",
             )
         elif "sync_config_files.py" in command_text:
@@ -1148,6 +1357,15 @@ def test_run_config_maintenance_summary_includes_runtime_additions_review_sectio
             review_output.write_text(
                 json.dumps(
                     {
+                        "applied_relocations": [
+                            {
+                                "path": "tools.web_search.city",
+                                "target_path": "tools.web_search.location.city",
+                                "detail": "copied \"Chicago\" into `tools.web_search.location.city` and removed the legacy key",
+                                "review_note": "Applied automatically in the proposal.",
+                            }
+                        ],
+                        "relocation_conflicts": [],
                         "added_safe_defaults": [
                             {
                                 "path": "features.telepathy",
@@ -1187,6 +1405,16 @@ def test_run_config_maintenance_summary_includes_runtime_additions_review_sectio
 
     summary_text = (delta_dir / "abcdef1" / "config-orchestration-summary.md").read_text(encoding="utf-8")
     assert exit_code == 0
+    assert "## Lifecycle Breakdown" in summary_text
+    assert "### True removals" in summary_text
+    assert "### Legacy aliases" in summary_text
+    assert "### Relocations" in summary_text
+    assert "`memories.phase_1_model`" in summary_text
+    assert "`no_memories_if_mcp_or_web_search` -> `disable_on_external_context`" in summary_text
+    assert "`tools.web_search.city` -> `tools.web_search.location.city`: applied automatically in the proposal" in summary_text
+    assert "## Runtime Migration Review" in summary_text
+    assert "### Applied relocations" in summary_text
+    assert "### Relocation conflicts" in summary_text
     assert "## Runtime Additions Requiring Review" in summary_text
     assert "### Added with safe defaults" in summary_text
     assert "### Added as exemplars and requiring manual configuration" in summary_text

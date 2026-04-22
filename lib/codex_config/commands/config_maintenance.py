@@ -213,17 +213,123 @@ def write_stage_section(lines: list[str], stage_results: list[dict[str, object]]
     lines.append("")
 
 
+def write_review_items(lines: list[str], raw_items) -> None:
+    items = raw_items if isinstance(raw_items, list) else []
+    if not items:
+        lines.append("- none")
+        lines.append("")
+        return
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path", "unknown")
+        target_path = item.get("target_path")
+        detail = item.get("detail", "")
+        review_note = item.get("review_note", "")
+        target_suffix = f" -> `{target_path}`" if target_path else ""
+        detail_suffix = f": {detail}" if detail else ""
+        note_suffix = f" {review_note}" if review_note else ""
+        lines.append(f"- `{path}`{target_suffix}{detail_suffix}{note_suffix}")
+    lines.append("")
+
+
+def write_lifecycle_section(
+    lines: list[str],
+    inventory: dict[str, object],
+    review_payload: dict[str, object] | None,
+) -> None:
+    entries = inventory.get("entries", []) if isinstance(inventory, dict) else []
+    if not isinstance(entries, list):
+        entries = []
+
+    removed = [
+        entry for entry in entries if isinstance(entry, dict) and entry.get("classification") == "removed"
+    ]
+    relocations = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and entry.get("classification") == "legacy"
+        and entry.get("migration_kind") == "relocation"
+    ]
+    legacy_aliases = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and entry.get("classification") == "legacy"
+        and entry.get("migration_kind") != "relocation"
+    ]
+    applied_paths = {
+        item.get("path")
+        for item in (review_payload or {}).get("applied_relocations", [])
+        if isinstance(item, dict)
+    }
+    conflict_paths = {
+        item.get("path")
+        for item in (review_payload or {}).get("relocation_conflicts", [])
+        if isinstance(item, dict)
+    }
+
+    lines.extend(["## Lifecycle Breakdown", ""])
+
+    lines.extend(["### True removals", ""])
+    if not removed:
+        lines.extend(["- none", ""])
+    else:
+        for entry in removed:
+            path = entry.get("path", "unknown")
+            note = entry.get("note", "")
+            lines.append(f"- `{path}`: {note}")
+        lines.append("")
+
+    lines.extend(["### Legacy aliases", ""])
+    if not legacy_aliases:
+        lines.extend(["- none", ""])
+    else:
+        for entry in legacy_aliases:
+            path = entry.get("path", "unknown")
+            target = entry.get("migration_target")
+            note = entry.get("note", "")
+            target_suffix = f" -> `{target}`" if target else ""
+            detail_suffix = f": {note}" if note else ""
+            lines.append(f"- `{path}`{target_suffix}{detail_suffix}")
+        lines.append("")
+
+    lines.extend(["### Relocations", ""])
+    if not relocations:
+        lines.extend(["- none", ""])
+    else:
+        for entry in relocations:
+            path = entry.get("path", "unknown")
+            target = entry.get("migration_target", "unknown")
+            if path in conflict_paths:
+                status = "manual-review conflict"
+            elif path in applied_paths:
+                status = "applied automatically in the proposal"
+            else:
+                status = "recorded as a relocation target"
+            lines.append(f"- `{path}` -> `{target}`: {status}")
+        lines.append("")
+
+
 def write_runtime_additions_section(lines: list[str], review_payload: dict[str, object] | None) -> None:
-    lines.extend(["## Runtime Additions Requiring Review", ""])
+    lines.extend(["## Runtime Migration Review", ""])
     if review_payload is None:
         lines.extend(
             [
-                "- runtime additions review metadata was not emitted for this run.",
+                "- runtime review metadata was not emitted for this run.",
                 "",
             ]
         )
         return
 
+    lines.extend(["### Applied relocations", ""])
+    write_review_items(lines, review_payload.get("applied_relocations", []))
+
+    lines.extend(["### Relocation conflicts", ""])
+    write_review_items(lines, review_payload.get("relocation_conflicts", []))
+
+    lines.extend(["## Runtime Additions Requiring Review", ""])
     sections = [
         ("### Added with safe defaults", review_payload.get("added_safe_defaults", [])),
         (
@@ -234,21 +340,7 @@ def write_runtime_additions_section(lines: list[str], review_payload: dict[str, 
     ]
     for heading, raw_items in sections:
         lines.extend([heading, ""])
-        items = raw_items if isinstance(raw_items, list) else []
-        if not items:
-            lines.append("- none")
-            lines.append("")
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            path = item.get("path", "unknown")
-            detail = item.get("detail", "")
-            review_note = item.get("review_note", "")
-            detail_suffix = f": {detail}" if detail else ""
-            note_suffix = f" {review_note}" if review_note else ""
-            lines.append(f"- `{path}`{detail_suffix}{note_suffix}")
-        lines.append("")
+        write_review_items(lines, raw_items)
 
 
 def main() -> int:
@@ -491,6 +583,7 @@ def main() -> int:
         except Exception:
             runtime_review_payload = None
     if args.mode != "alpha-sort-only":
+        write_lifecycle_section(summary_lines, inventory, runtime_review_payload)
         write_runtime_additions_section(summary_lines, runtime_review_payload)
     if validation_result is not None and validation_result.stderr.strip():
         summary_lines.extend(["## Validation stderr", "", "```text", validation_result.stderr.strip(), "```", ""])

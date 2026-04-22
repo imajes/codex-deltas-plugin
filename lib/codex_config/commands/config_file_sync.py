@@ -37,6 +37,7 @@ from codex_config.shared import sort_block_body_lines
 from codex_config.shared import sort_block_groups
 from codex_config.shared import sort_root_scalar_lines
 from codex_config.shared import split_toml_blocks
+from codex_config.shared import toml_loads
 from codex_config.shared import trim_repeated_blank_lines
 from codex_config.shared import write_text
 
@@ -65,13 +66,25 @@ class RuntimeAdditionRecord:
 
 
 @dataclass(frozen=True)
+class RuntimeRelocationRecord:
+    path: str
+    target_path: str
+    detail: str
+    review_note: str
+
+
+@dataclass(frozen=True)
 class RuntimeAdditionReview:
+    applied_relocations: list[RuntimeRelocationRecord]
+    relocation_conflicts: list[RuntimeRelocationRecord]
     added_safe_defaults: list[RuntimeAdditionRecord]
     added_exemplars: list[RuntimeAdditionRecord]
     skipped: list[RuntimeAdditionRecord]
 
     def to_payload(self) -> dict[str, Any]:
         return {
+            "applied_relocations": [asdict(item) for item in self.applied_relocations],
+            "relocation_conflicts": [asdict(item) for item in self.relocation_conflicts],
             "added_safe_defaults": [asdict(item) for item in self.added_safe_defaults],
             "added_exemplars": [asdict(item) for item in self.added_exemplars],
             "skipped": [asdict(item) for item in self.skipped],
@@ -95,6 +108,7 @@ PATH_DESCRIPTION_OVERRIDES = {
     "realtime.version": "Protocol version used for realtime conversations.",
     "realtime.voice": "Voice used for realtime conversations.",
 }
+MISSING_RUNTIME_VALUE = object()
 
 
 def parse_args() -> argparse.Namespace:
@@ -373,6 +387,203 @@ def strip_quotes(segment: str) -> str:
 
 def split_path(path: str) -> list[str]:
     return [strip_quotes(part) for part in split_header_path(path)]
+
+
+def runtime_value_repr(value: Any) -> str:
+    rendered = render_toml_value(value)
+    if rendered is not None:
+        return rendered
+    return repr(value)
+
+
+def lookup_runtime_value(node: Any, path_parts: list[str]) -> Any:
+    if not path_parts:
+        return node
+    if getattr(node, "get", None) is None:
+        return MISSING_RUNTIME_VALUE
+    if len(path_parts) == 1:
+        return node.get(path_parts[0], MISSING_RUNTIME_VALUE)
+    child = node.get(path_parts[0])
+    if child is None:
+        return node.get(".".join(path_parts), MISSING_RUNTIME_VALUE)
+    return lookup_runtime_value(child, path_parts[1:])
+
+
+def set_runtime_value(node: Any, path_parts: list[str], value: Any) -> None:
+    if not path_parts or getattr(node, "__setitem__", None) is None:
+        return
+    if len(path_parts) == 1:
+        node[path_parts[0]] = value
+        return
+    head = path_parts[0]
+    child = node.get(head)
+    if getattr(child, "__setitem__", None) is None:
+        child = {}
+        node[head] = child
+    set_runtime_value(child, path_parts[1:], value)
+
+
+def delete_runtime_value(node: Any, path_parts: list[str]) -> None:
+    if not path_parts or getattr(node, "pop", None) is None:
+        return
+    if len(path_parts) == 1:
+        node.pop(path_parts[0], None)
+        return
+    child = node.get(path_parts[0])
+    if child is None:
+        node.pop(".".join(path_parts), None)
+        return
+    delete_runtime_value(child, path_parts[1:])
+    if getattr(child, "items", None) is not None and not list(child.items()):
+        node.pop(path_parts[0], None)
+
+
+def remove_runtime_root_lines(root_lines: list[str], keys: set[str]) -> list[str]:
+    groups, suffix = collect_assignment_groups(root_lines, 0)
+    filtered: list[str] = []
+    for key_name, group in groups:
+        if key_name in keys:
+            continue
+        filtered.extend(group)
+    filtered.extend(suffix)
+    return filtered
+
+
+def prune_empty_runtime_blocks(blocks: list[TomlBlock]) -> list[TomlBlock]:
+    return [block for block in blocks if any(line.strip() for line in block.body_lines)]
+
+
+def remove_runtime_path_lines(
+    root_lines: list[str],
+    blocks: list[TomlBlock],
+    path: str,
+) -> list[str]:
+    parts = split_header_path(path)
+    if len(parts) == 1:
+        return remove_runtime_root_lines(root_lines, {parts[0].lower()})
+    header = ".".join(parts[:-1])
+    block = find_block(blocks, header)
+    if block is None:
+        return root_lines
+    remove_runtime_lines(block, {path})
+    block.body_lines = sort_block_body_lines(block.body_lines)
+    blocks[:] = prune_empty_runtime_blocks(blocks)
+    return root_lines
+
+
+def add_runtime_assignment_lines(
+    root_lines: list[str],
+    blocks: list[TomlBlock],
+    path: str,
+    value: Any,
+) -> tuple[list[str], bool]:
+    rendered_value = render_toml_value(value)
+    if rendered_value is None:
+        return root_lines, False
+
+    parts = split_header_path(path)
+    key_name = parts[-1]
+    header = ".".join(parts[:-1]) or None
+    line = f"{key_name} = {rendered_value}"
+    if header is None:
+        if root_has_any_key(root_lines, key_name):
+            return root_lines, True
+        root_lines.append(line)
+        return sort_root_scalar_lines(root_lines, add_root_comment=False), True
+
+    block = find_block(blocks, header)
+    if block is None:
+        block = TomlBlock(header=header, header_line=f"[{header}]", body_lines=[])
+        blocks.append(block)
+    if block_has_any_key(block, key_name):
+        return root_lines, True
+    block.body_lines.append(line)
+    block.body_lines = sort_block_body_lines(block.body_lines)
+    return root_lines, True
+
+
+def apply_runtime_relocations(
+    runtime_text: str,
+    relocation_entries: list[dict[str, Any]],
+) -> tuple[str, list[RuntimeRelocationRecord], list[RuntimeRelocationRecord]]:
+    if not relocation_entries:
+        return runtime_text, [], []
+
+    runtime_data = toml_loads(runtime_text)
+    root_lines, runtime_blocks = split_toml_blocks(runtime_text)
+    applied: list[RuntimeRelocationRecord] = []
+    conflicts: list[RuntimeRelocationRecord] = []
+
+    for entry in sorted(relocation_entries, key=lambda item: item["path"]):
+        source_path = str(entry["path"])
+        target_path = str(entry.get("migration_target") or "")
+        if not target_path:
+            continue
+        source_value = lookup_runtime_value(runtime_data, split_path(source_path))
+        if source_value is MISSING_RUNTIME_VALUE:
+            continue
+        target_value = lookup_runtime_value(runtime_data, split_path(target_path))
+
+        if target_value is MISSING_RUNTIME_VALUE:
+            root_lines, added = add_runtime_assignment_lines(root_lines, runtime_blocks, target_path, source_value)
+            if not added:
+                conflicts.append(
+                    RuntimeRelocationRecord(
+                        path=source_path,
+                        target_path=target_path,
+                        detail=(
+                            f"could not render `{source_path}` value {runtime_value_repr(source_value)} into "
+                            f"`{target_path}` automatically"
+                        ),
+                        review_note="Manual review required; the legacy value was left in place.",
+                    )
+                )
+                continue
+            set_runtime_value(runtime_data, split_path(target_path), source_value)
+            root_lines = remove_runtime_path_lines(root_lines, runtime_blocks, source_path)
+            delete_runtime_value(runtime_data, split_path(source_path))
+            applied.append(
+                RuntimeRelocationRecord(
+                    path=source_path,
+                    target_path=target_path,
+                    detail=(
+                        f"copied {runtime_value_repr(source_value)} into `{target_path}` and removed the legacy key"
+                    ),
+                    review_note="Applied automatically in the proposal.",
+                )
+            )
+            continue
+
+        if target_value == source_value:
+            root_lines = remove_runtime_path_lines(root_lines, runtime_blocks, source_path)
+            delete_runtime_value(runtime_data, split_path(source_path))
+            applied.append(
+                RuntimeRelocationRecord(
+                    path=source_path,
+                    target_path=target_path,
+                    detail=(
+                        f"removed the legacy key after confirming both paths already used "
+                        f"{runtime_value_repr(source_value)}"
+                    ),
+                    review_note="Applied automatically in the proposal.",
+                )
+            )
+            continue
+
+        conflicts.append(
+            RuntimeRelocationRecord(
+                path=source_path,
+                target_path=target_path,
+                detail=(
+                    f"kept legacy value {runtime_value_repr(source_value)} because `{target_path}` already uses "
+                    f"{runtime_value_repr(target_value)}"
+                ),
+                review_note="Manual review required; conflicting values were left unchanged.",
+            )
+        )
+
+    runtime_blocks = sort_block_groups(prune_empty_runtime_blocks(runtime_blocks))
+    return render_toml_blocks(root_lines, runtime_blocks), applied, conflicts
 
 
 def merge_toml_tables(target, source) -> None:
@@ -1247,6 +1458,8 @@ def build_runtime_addition_review(
         )
 
     return RuntimeAdditionReview(
+        applied_relocations=[],
+        relocation_conflicts=[],
         added_safe_defaults=safe_defaults,
         added_exemplars=exemplars,
         skipped=skipped,
@@ -1417,18 +1630,26 @@ def main() -> int:
     inventory = load_json(args.inventory)
     inventory_entries = inventory["entries"]
     entry_map = {entry["path"]: entry for entry in inventory_entries}
+    relocation_entries = [
+        entry
+        for entry in inventory_entries
+        if entry.get("classification") == "legacy"
+        and entry.get("migration_kind") == "relocation"
+        and entry.get("migration_target")
+    ]
     runtime_remove_paths = {
         entry["path"]
         for entry in inventory_entries
         if entry["runtime_policy"] == "remove"
-        and entry.get("classification") in {"removed", "legacy"}
+        and (
+            entry.get("classification") == "removed"
+            or (
+                entry.get("classification") == "legacy"
+                and entry.get("migration_kind") != "relocation"
+            )
+        )
     }
     schema = load_json(args.schema)
-    runtime_addition_review = build_runtime_addition_review(
-        inventory_entries,
-        schema,
-        runtime_text,
-    )
 
     specs = load_feature_specs(args.features_lib)
     aliases = load_legacy_feature_aliases(args.legacy_features, specs)
@@ -1491,13 +1712,31 @@ def main() -> int:
         inventory_entries,
     )
 
+    runtime_text, applied_relocations, relocation_conflicts = apply_runtime_relocations(
+        runtime_text,
+        relocation_entries,
+    )
+
     runtime_output = runtime_doc_with_tomlkit(runtime_text, runtime_remove_paths)
     if runtime_output is None:
+        runtime_root, runtime_blocks = split_toml_blocks(runtime_text)
         runtime_root = migrate_runtime_permissions(runtime_root, runtime_blocks)
         runtime_root = remove_runtime_root_aliases(runtime_root)
         apply_runtime_removals(runtime_blocks, runtime_remove_paths)
         runtime_blocks = sort_block_groups(runtime_blocks)
         runtime_output = render_toml_blocks(runtime_root, runtime_blocks)
+    runtime_addition_review = build_runtime_addition_review(
+        inventory_entries,
+        schema,
+        runtime_output,
+    )
+    runtime_addition_review = RuntimeAdditionReview(
+        applied_relocations=applied_relocations,
+        relocation_conflicts=relocation_conflicts,
+        added_safe_defaults=runtime_addition_review.added_safe_defaults,
+        added_exemplars=runtime_addition_review.added_exemplars,
+        skipped=runtime_addition_review.skipped,
+    )
     runtime_output = apply_runtime_addition_review(
         runtime_output,
         runtime_addition_review,

@@ -13,9 +13,13 @@ from codex_config.shared import read_text
 from codex_config.shared import render_inventory_summary
 from codex_config.shared import sort_block_body_lines
 from codex_config.shared import sort_block_groups
+from codex_config.shared import split_header_path
 from codex_config.shared import split_toml_blocks
 from codex_config.shared import toml_loads
 from codex_config.shared import write_text
+
+
+MISSING_RUNTIME_VALUE = object()
 
 
 def parse_args() -> argparse.Namespace:
@@ -120,6 +124,33 @@ def validate_runtime_permissions(parsed_runtime, runtime_blocks: list[TomlBlock]
     return failures
 
 
+def lookup_runtime_value(node, path_parts: list[str]):
+    if not path_parts or getattr(node, "get", None) is None:
+        return MISSING_RUNTIME_VALUE
+    if len(path_parts) == 1:
+        return node.get(path_parts[0], MISSING_RUNTIME_VALUE)
+    child = node.get(path_parts[0])
+    if child is None:
+        return node.get(".".join(path_parts), MISSING_RUNTIME_VALUE)
+    return lookup_runtime_value(child, path_parts[1:])
+
+
+def is_allowed_relocation_conflict(
+    entry: InventoryEntry,
+    parsed_runtime,
+    runtime_active_paths: set[str],
+) -> bool:
+    if entry.migration_kind != "relocation" or not entry.migration_target:
+        return False
+    if entry.path not in runtime_active_paths or entry.migration_target not in runtime_active_paths:
+        return False
+    source_value = lookup_runtime_value(parsed_runtime, split_header_path(entry.path))
+    target_value = lookup_runtime_value(parsed_runtime, split_header_path(entry.migration_target))
+    if source_value is MISSING_RUNTIME_VALUE or target_value is MISSING_RUNTIME_VALUE:
+        return False
+    return source_value != target_value
+
+
 def main() -> int:
     args = parse_args()
     inventory = {"summary": {}}
@@ -176,6 +207,8 @@ def main() -> int:
                 if entry.path in clean_active_paths:
                     failures.append(f"legacy key still active in clean: {entry.path}")
                 if entry.path in runtime_active_paths:
+                    if is_allowed_relocation_conflict(entry, parsed_runtime, runtime_active_paths):
+                        continue
                     failures.append(f"legacy key still active in runtime proposal: {entry.path}")
 
         failures.extend(validate_runtime_permissions(parsed_runtime, runtime_blocks))

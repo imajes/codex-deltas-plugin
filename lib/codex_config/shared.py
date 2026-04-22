@@ -9,6 +9,7 @@ from dataclasses import asdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from typing import Callable
 from urllib.parse import urlparse
 
 try:
@@ -76,8 +77,6 @@ LEGACY_COMPATIBILITY_RULES = (
         "disable_on_external_context",
         "Legacy compatibility alias; prefer `disable_on_external_context`.",
     ),
-)
-MOVED_KEY_RULES = (
     (
         re.compile(r"^permissions\.network(?:\.(?P<suffix>.+))?$"),
         lambda match: (
@@ -86,6 +85,8 @@ MOVED_KEY_RULES = (
         ),
         "Legacy permissions networking path; prefer `[permissions.workspace.network]`.",
     ),
+)
+RELOCATION_RULES: tuple[tuple[re.Pattern[str], Callable[[re.Match[str]], str], str], ...] = (
     (
         re.compile(r"^tools\.web_search\.(?P<leaf>city|country|region|timezone)$"),
         lambda match: f"tools.web_search.location.{match.group('leaf')}",
@@ -151,6 +152,7 @@ class InventoryEntry:
     runtime_policy: str
     note: str
     migration_target: str | None = None
+    migration_kind: str | None = None
     is_new: bool = False
     platform_specific: bool = False
     description: str | None = None
@@ -172,6 +174,7 @@ class NonFeatureLifecycleDecision:
     runtime_policy: str
     note: str
     migration_target: str | None = None
+    migration_kind: str | None = None
 
 
 @dataclass
@@ -734,6 +737,102 @@ def schema_path_is_modeled(
     return any(pattern.fullmatch(path) for pattern in dynamic_patterns)
 
 
+def normalize_schema_node(schema: dict[str, Any], node: Any) -> dict[str, Any]:
+    resolved = resolve_schema_ref(schema, node)
+    if not isinstance(resolved, dict):
+        return {}
+
+    merged: dict[str, Any] = {}
+    for combiner in ("allOf", "anyOf", "oneOf"):
+        children = resolved.get(combiner)
+        if isinstance(children, list):
+            for child in children:
+                merged = schema_merge(merged, normalize_schema_node(schema, child))
+    for key, value in resolved.items():
+        if key in {"allOf", "anyOf", "oneOf"}:
+            continue
+        merged = schema_merge(merged, {key: value})
+    return merged
+
+
+def lookup_schema_node(schema: dict[str, Any], path: str) -> dict[str, Any] | None:
+    node = normalize_schema_node(schema, schema)
+    for part in split_header_path(path):
+        properties = node.get("properties")
+        if isinstance(properties, dict) and part in properties:
+            node = normalize_schema_node(schema, properties[part])
+            continue
+
+        pattern_properties = node.get("patternProperties")
+        if isinstance(pattern_properties, dict):
+            match = None
+            for pattern, child in pattern_properties.items():
+                if re.fullmatch(pattern, part):
+                    match = child
+                    break
+            if match is not None:
+                node = normalize_schema_node(schema, match)
+                continue
+
+        additional = node.get("additionalProperties")
+        if isinstance(additional, dict):
+            node = normalize_schema_node(schema, additional)
+            continue
+        return None
+    return node
+
+
+def schema_merge(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(target)
+    for key, value in source.items():
+        if key in {"properties", "patternProperties"} and isinstance(value, dict):
+            combined = dict(merged.get(key, {}))
+            combined.update(value)
+            merged[key] = combined
+            continue
+        if key == "required" and isinstance(value, list):
+            merged[key] = list(dict.fromkeys([*merged.get(key, []), *value]))
+            continue
+        merged[key] = value
+    return merged
+
+
+def schema_type_family(node: dict[str, Any]) -> str:
+    enum_values = node.get("enum")
+    if isinstance(enum_values, list) and enum_values:
+        enum_types = {type(value).__name__ for value in enum_values}
+        if enum_types == {"str"}:
+            return "string"
+        if enum_types == {"bool"}:
+            return "boolean"
+        if enum_types <= {"int"}:
+            return "integer"
+        if enum_types <= {"int", "float"}:
+            return "number"
+        return "enum"
+
+    node_type = node.get("type")
+    if node_type == "array":
+        items = node.get("items")
+        if isinstance(items, dict):
+            return f"array<{schema_type_family(items)}>"
+        return "array"
+    if node_type == "object" or isinstance(node.get("additionalProperties"), dict):
+        return "object"
+    if isinstance(node_type, str):
+        return node_type
+    return "value"
+
+
+def schema_types_compatible(source_node: dict[str, Any], target_node: dict[str, Any]) -> bool:
+    source_family = schema_type_family(source_node)
+    target_family = schema_type_family(target_node)
+    if source_family == target_family:
+        return True
+    string_like = {source_family, target_family}
+    return string_like <= {"string", "enum"}
+
+
 def flatten_toml_paths(path: Path) -> set[str]:
     section_parts: list[str] = []
     keys: set[str] = set()
@@ -1214,6 +1313,7 @@ def make_non_feature_lifecycle_decision(
     source: str,
     note: str,
     migration_target: str | None = None,
+    migration_kind: str | None = None,
 ) -> NonFeatureLifecycleDecision:
     clean_policy, runtime_policy = lifecycle_policies_for_classification(classification)
     return NonFeatureLifecycleDecision(
@@ -1223,10 +1323,46 @@ def make_non_feature_lifecycle_decision(
         runtime_policy=runtime_policy,
         note=note,
         migration_target=migration_target,
+        migration_kind=migration_kind,
     )
 
 
-def classify_non_feature_key(path: str, pre_schema_hints: list[PreSchemaHint]) -> NonFeatureLifecycleDecision:
+def relocation_is_proven(
+    source_path: str,
+    target_path: str,
+    *,
+    current_schema: dict[str, Any] | None,
+    current_schema_paths: set[str] | None,
+    current_schema_dynamic_patterns: list[re.Pattern[str]] | None,
+    previous_schema: dict[str, Any] | None,
+) -> bool:
+    if (
+        current_schema is None
+        or current_schema_paths is None
+        or current_schema_dynamic_patterns is None
+        or previous_schema is None
+    ):
+        return False
+    if schema_path_is_modeled(source_path, current_schema_paths, current_schema_dynamic_patterns):
+        return False
+    if not schema_path_is_modeled(target_path, current_schema_paths, current_schema_dynamic_patterns):
+        return False
+    source_node = lookup_schema_node(previous_schema, source_path)
+    target_node = lookup_schema_node(current_schema, target_path)
+    if source_node is None or target_node is None:
+        return False
+    return schema_types_compatible(source_node, target_node)
+
+
+def classify_non_feature_key(
+    path: str,
+    pre_schema_hints: list[PreSchemaHint],
+    *,
+    current_schema: dict[str, Any] | None = None,
+    current_schema_paths: set[str] | None = None,
+    current_schema_dynamic_patterns: list[re.Pattern[str]] | None = None,
+    previous_schema: dict[str, Any] | None = None,
+) -> NonFeatureLifecycleDecision:
     for pattern, metadata in PRE_SCHEMA_PATTERNS.items():
         if pattern.match(path):
             return make_non_feature_lifecycle_decision(
@@ -1242,12 +1378,14 @@ def classify_non_feature_key(path: str, pre_schema_hints: list[PreSchemaHint]) -
                 hint.note,
             )
     for pattern, target, note in LEGACY_COMPATIBILITY_RULES:
-        if pattern.match(path):
+        match = pattern.match(path)
+        if match:
+            migration_target = target(match) if callable(target) else target
             return make_non_feature_lifecycle_decision(
                 "legacy",
                 "compatibility",
                 note,
-                migration_target=target,
+                migration_target=migration_target,
             )
     if legacy_key_matches(path):
         return make_non_feature_lifecycle_decision(
@@ -1255,14 +1393,29 @@ def classify_non_feature_key(path: str, pre_schema_hints: list[PreSchemaHint]) -
             "compatibility",
             "Legacy compatibility key; keep comment-only in clean and remove from runtime proposals.",
         )
-    for pattern, target_factory, note in MOVED_KEY_RULES:
+    for pattern, target_factory, note in RELOCATION_RULES:
         match = pattern.match(path)
         if match:
+            target_path = target_factory(match)
+            if relocation_is_proven(
+                path,
+                target_path,
+                current_schema=current_schema,
+                current_schema_paths=current_schema_paths,
+                current_schema_dynamic_patterns=current_schema_dynamic_patterns,
+                previous_schema=previous_schema,
+            ):
+                return make_non_feature_lifecycle_decision(
+                    "legacy",
+                    "compatibility",
+                    note,
+                    migration_target=target_path,
+                    migration_kind="relocation",
+                )
             return make_non_feature_lifecycle_decision(
-                "legacy",
+                "removed",
                 "compatibility",
-                note,
-                migration_target=target_factory(match),
+                "Removed from current config model; should not stay in either file.",
             )
     for pattern, note in OPERATIONAL_KEY_RULES:
         if pattern.match(path):

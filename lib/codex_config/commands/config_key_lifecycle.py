@@ -105,10 +105,12 @@ def build_feature_entries(
 
 
 def build_non_feature_entries(
+    current_schema: dict,
     schema_paths: set[str],
     schema_dynamic_patterns,
     clean_paths: set[str],
     runtime_paths: set[str],
+    previous_schema: dict | None,
     from_schema_paths: set[str],
     from_schema_dynamic_patterns,
     pre_schema_hints,
@@ -127,20 +129,30 @@ def build_non_feature_entries(
                 classification = "new"
                 source = "schema"
                 migration_target = None
+                migration_kind = None
                 note = "New schema-visible key since comparison baseline."
             else:
                 classification = "active"
                 source = "schema"
                 migration_target = None
+                migration_kind = None
                 if path in schema_paths:
                     note = "Schema-visible current key."
                 else:
                     note = "Schema-modeled dynamic key."
         else:
-            decision = classify_non_feature_key(path, pre_schema_hints)
+            decision = classify_non_feature_key(
+                path,
+                pre_schema_hints,
+                current_schema=current_schema,
+                current_schema_paths=schema_paths,
+                current_schema_dynamic_patterns=schema_dynamic_patterns,
+                previous_schema=previous_schema,
+            )
             classification = decision.classification
             source = decision.source
             migration_target = decision.migration_target
+            migration_kind = decision.migration_kind
             clean_policy = decision.clean_policy
             runtime_policy = decision.runtime_policy
             note = decision.note
@@ -158,6 +170,7 @@ def build_non_feature_entries(
                 runtime_policy=runtime_policy,
                 note=note,
                 migration_target=migration_target,
+                migration_kind=migration_kind,
                 is_new=classification == "new",
             )
         )
@@ -175,6 +188,7 @@ def main() -> int:
     current_aliases = load_legacy_feature_aliases(args.legacy_features, current_specs)
     pre_schema_hints = build_pre_schema_hints(args.repo, git_dir=args.git_dir)
 
+    previous_schema: dict | None = None
     previous_schema_paths: set[str] = set()
     previous_schema_dynamic_patterns = []
     previous_specs: dict[str, FeatureSpecRecord] = {}
@@ -188,9 +202,8 @@ def main() -> int:
                 "codex-rs/core/config.schema.json",
                 git_dir=args.git_dir,
             )
-            previous_schema_paths, previous_schema_dynamic_patterns = build_schema_path_index(
-                json.loads(previous_schema_text)
-            )
+            previous_schema = json.loads(previous_schema_text)
+            previous_schema_paths, previous_schema_dynamic_patterns = build_schema_path_index(previous_schema)
             previous_specs = {
                 spec.key: spec
                 for spec in load_feature_specs_at_ref(
@@ -218,10 +231,12 @@ def main() -> int:
         args.from_sha,
     )
     non_feature_entries = build_non_feature_entries(
+        current_schema,
         current_schema_paths,
         current_schema_dynamic_patterns,
         clean_paths,
         runtime_paths,
+        previous_schema,
         previous_schema_paths,
         previous_schema_dynamic_patterns,
         pre_schema_hints,

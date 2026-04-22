@@ -6,6 +6,53 @@ This repository does not yet use annotated release tags, so the version sections
 below are reconstructed from the committed version metadata and the actual git
 history in this repo.
 
+## [0.7.0] - 2026-04-22
+
+This release makes config sync relocation-aware so reorganized keys can migrate
+into their canonical paths instead of being reported and synthesized like true
+removals. It also upgrades the runtime review and summary artifacts so
+relocations, legacy aliases, and actual removals are distinct in downstream
+reporting.
+
+### Fixed
+
+- Fixed non-feature lifecycle classification so proven key moves can stay in
+  the existing `legacy` bucket with explicit `migration_kind = "relocation"`
+  metadata instead of collapsing into the true-removal story.
+- Fixed runtime proposal synthesis for flat web-search location keys so
+  `tools.web_search.{city,country,region,timezone}` can migrate into
+  `tools.web_search.location.*` before plain removals are applied.
+- Fixed relocation handling when both legacy and canonical runtime keys are
+  already present by preserving conflicting values for manual review instead of
+  auto-dropping the old key.
+- Fixed validation behavior for relocation conflicts so proposal-only manual
+  review cases no longer fail like ordinary legacy-key cleanup misses.
+
+### Changed
+
+- Added relocation metadata to config findings inventory entries and threaded it
+  through lifecycle classification, synthesis, validation, and reporting.
+- Added runtime review sections for `applied_relocations` and
+  `relocation_conflicts` so proposal artifacts show what was migrated
+  automatically versus what still needs human review.
+- Expanded `config-orchestration-summary.md` with a lifecycle breakdown that
+  separates true removals, plain legacy aliases, and relocations while keeping
+  the top-line classification summary stable.
+- Updated plugin workflow docs so downstream report composition treats
+  relocations as part of the `legacy` count but not part of the true-removal
+  narrative.
+- Bumped the plugin/package metadata to `0.7.0` in packaging, plugin manifest,
+  and lockfile surfaces.
+
+### Tests
+
+- Extended `tests/test_runtime_sync.py` with regression coverage for:
+  - relocation classification with explicit schema proof
+  - migration of flat web-search location keys into nested runtime paths
+  - manual-review relocation conflicts
+  - relocation-aware validation behavior
+  - relocation and lifecycle summary reporting
+
 ## [0.6.0] - 2026-04-22
 
 This release hardens non-feature lifecycle classification so runtime cleanup is
