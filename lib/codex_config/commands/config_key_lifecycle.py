@@ -137,23 +137,17 @@ def build_non_feature_entries(
                 else:
                     note = "Schema-modeled dynamic key."
         else:
-            classification, source, migration_target = classify_non_feature_key(path, pre_schema_hints)
-            note = ""
-        clean_policy = "active"
-        runtime_policy = "preserve-or-add"
-        default_value = None
-        if classification == "removed":
-            clean_policy = "omit"
-            runtime_policy = "remove"
-            note = "Removed from current config model; should not stay in either file."
-        elif classification == "legacy":
-            clean_policy = "commented"
-            runtime_policy = "remove"
-            note = "Legacy compatibility shape; comment-only in clean."
-        elif classification == "pre-schema":
+            decision = classify_non_feature_key(path, pre_schema_hints)
+            classification = decision.classification
+            source = decision.source
+            migration_target = decision.migration_target
+            clean_policy = decision.clean_policy
+            runtime_policy = decision.runtime_policy
+            note = decision.note
+        if schema_path_is_modeled(path, schema_paths, schema_dynamic_patterns):
             clean_policy = "active"
             runtime_policy = "preserve-or-add"
-            note = "Actively read in code but not represented in generated schema."
+        default_value = None
         entries.append(
             InventoryEntry(
                 path=path,

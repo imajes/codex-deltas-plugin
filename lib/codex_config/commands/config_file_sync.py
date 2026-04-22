@@ -48,6 +48,12 @@ class PreservedRuntimeBlocks:
 
 
 @dataclass(frozen=True)
+class PreservedRuntimeAssignments:
+    root_groups: list[tuple[str, list[str]]]
+    block_groups: dict[str, list[tuple[str, list[str]]]]
+
+
+@dataclass(frozen=True)
 class RuntimeAdditionRecord:
     path: str
     status: str
@@ -261,17 +267,46 @@ def build_section_prefix(block: TomlBlock | None) -> list[str]:
     return trim_repeated_blank_lines(prefix)
 
 
-def clean_generic_block(block: TomlBlock) -> None:
-    filtered: list[str] = []
-    for line in block.body_lines:
-        key_name = parse_key_name(line)
-        full_path = f"{block.header}.{key_name}" if key_name else ""
+def comment_out_assignment_group(group: list[str]) -> list[str]:
+    commented = list(group)
+    for index, line in enumerate(commented):
+        if parse_key_name(line) is None:
+            continue
+        if line.lstrip().startswith("#"):
+            return commented
+        commented[index] = f"# {line}".rstrip()
+        return commented
+    return commented
+
+
+def clean_generic_block(block: TomlBlock, entry_map: dict[str, dict[str, Any]]) -> None:
+    prefix: list[str] = []
+    index = 0
+    while index < len(block.body_lines):
+        if parse_key_name(block.body_lines[index]):
+            break
+        prefix.append(block.body_lines[index])
+        index += 1
+    groups, suffix = collect_assignment_groups(block.body_lines, index)
+    filtered = list(prefix)
+    for key_name, group in groups:
+        full_path = f"{block.header}.{key_name}"
+        entry = entry_map.get(full_path)
+        if entry is not None:
+            if entry.get("clean_policy") == "omit":
+                continue
+            if entry.get("clean_policy") == "commented":
+                filtered.extend(comment_out_assignment_group(group))
+                continue
+            filtered.extend(group)
+            continue
         if full_path in REMOVED_KEYS:
             continue
-        if legacy_key_matches(full_path) and not line.lstrip().startswith("#"):
-            filtered.append(f"# {line}".rstrip())
+        if legacy_key_matches(full_path):
+            filtered.extend(comment_out_assignment_group(group))
             continue
-        filtered.append(line)
+        filtered.extend(group)
+    filtered.extend(suffix)
     block.body_lines = sort_block_body_lines(filtered)
 
 
@@ -416,6 +451,32 @@ def has_active_assignments(lines: list[str]) -> bool:
     return any(parse_key_name(line) and not line.lstrip().startswith("#") for line in lines)
 
 
+def is_commented_assignment_group(group: list[str]) -> bool:
+    for line in group:
+        if parse_key_name(line) is None:
+            continue
+        return line.lstrip().startswith("#")
+    return False
+
+
+def collect_matching_assignment_groups(
+    lines: list[str],
+    *,
+    header: str | None,
+    preserve_paths: set[str],
+) -> list[tuple[str, list[str]]]:
+    groups, _ = collect_assignment_groups(lines, 0)
+    preserved: list[tuple[str, list[str]]] = []
+    for key_name, group in groups:
+        full_path = f"{header}.{key_name}" if header else key_name
+        if full_path not in preserve_paths:
+            continue
+        if not is_commented_assignment_group(group):
+            continue
+        preserved.append((key_name, group))
+    return preserved
+
+
 def collect_comment_only_reference_blocks(runtime_text: str) -> PreservedRuntimeBlocks:
     _, runtime_blocks = split_toml_blocks(runtime_text)
     ordered_headers = [block.header for block in runtime_blocks]
@@ -427,6 +488,39 @@ def collect_comment_only_reference_blocks(runtime_text: str) -> PreservedRuntime
     return PreservedRuntimeBlocks(
         ordered_headers=ordered_headers,
         comment_only_blocks=preserved,
+    )
+
+
+def collect_preserved_runtime_assignment_groups(
+    runtime_text: str,
+    inventory_entries: list[dict[str, Any]],
+) -> PreservedRuntimeAssignments:
+    preserve_paths = {
+        str(entry["path"])
+        for entry in inventory_entries
+        if entry.get("classification") in {"operational", "ambiguous"}
+        and entry.get("runtime_policy") != "remove"
+    }
+    if not preserve_paths:
+        return PreservedRuntimeAssignments(root_groups=[], block_groups={})
+
+    root_lines, runtime_blocks = split_toml_blocks(runtime_text)
+    block_groups: dict[str, list[tuple[str, list[str]]]] = {}
+    for block in runtime_blocks:
+        groups = collect_matching_assignment_groups(
+            block.body_lines,
+            header=block.header,
+            preserve_paths=preserve_paths,
+        )
+        if groups:
+            block_groups[block.header] = groups
+    return PreservedRuntimeAssignments(
+        root_groups=collect_matching_assignment_groups(
+            root_lines,
+            header=None,
+            preserve_paths=preserve_paths,
+        ),
+        block_groups=block_groups,
     )
 
 
@@ -780,6 +874,10 @@ def block_has_active_key(block: TomlBlock, key_name: str) -> bool:
     return False
 
 
+def block_has_any_key(block: TomlBlock, key_name: str) -> bool:
+    return any(parse_key_name(line) == key_name for line in block.body_lines)
+
+
 def root_has_active_key(root_lines: list[str], key_name: str) -> bool:
     for line in root_lines:
         if line.lstrip().startswith("#"):
@@ -787,6 +885,10 @@ def root_has_active_key(root_lines: list[str], key_name: str) -> bool:
         if parse_key_name(line) == key_name:
             return True
     return False
+
+
+def root_has_any_key(root_lines: list[str], key_name: str) -> bool:
+    return any(parse_key_name(line) == key_name for line in root_lines)
 
 
 def ensure_exemplar_block_comment(block: TomlBlock) -> None:
@@ -1247,6 +1349,49 @@ def restore_missing_runtime_reference_blocks(
     return render_toml_blocks(root_lines, ordered_blocks)
 
 
+def restore_preserved_runtime_assignment_groups(
+    runtime_text: str,
+    preserved_groups: PreservedRuntimeAssignments,
+) -> str:
+    if not preserved_groups.root_groups and not preserved_groups.block_groups:
+        return runtime_text
+
+    root_lines, runtime_blocks = split_toml_blocks(runtime_text)
+    touched_root = False
+    touched_headers: set[str] = set()
+
+    for key_name, group in preserved_groups.root_groups:
+        if root_has_any_key(root_lines, key_name):
+            continue
+        root_lines.extend(group)
+        touched_root = True
+
+    for header, groups in preserved_groups.block_groups.items():
+        block = find_block(runtime_blocks, header)
+        if block is None:
+            block = TomlBlock(
+                header=header,
+                header_line=f"[{header}]",
+                body_lines=[],
+            )
+            runtime_blocks.append(block)
+        for key_name, group in groups:
+            if block_has_any_key(block, key_name):
+                continue
+            block.body_lines.extend(group)
+            touched_headers.add(header)
+
+    if touched_root:
+        root_lines = sort_root_scalar_lines(root_lines, add_root_comment=False)
+    for block in runtime_blocks:
+        if block.header in touched_headers:
+            block.body_lines = sort_block_body_lines(block.body_lines)
+    if touched_headers:
+        runtime_blocks = sort_block_groups(runtime_blocks)
+
+    return render_toml_blocks(root_lines, runtime_blocks)
+
+
 def main() -> int:
     args = parse_args()
     clean_root, clean_blocks = split_toml_blocks(read_text(args.config_clean))
@@ -1276,6 +1421,7 @@ def main() -> int:
         entry["path"]
         for entry in inventory_entries
         if entry["runtime_policy"] == "remove"
+        and entry.get("classification") in {"removed", "legacy"}
     }
     schema = load_json(args.schema)
     runtime_addition_review = build_runtime_addition_review(
@@ -1328,18 +1474,22 @@ def main() -> int:
     for header in ("memories", "tools", "profiles.example", "profiles.example.tools"):
         block = find_block(clean_blocks, header)
         if block is not None:
-            clean_generic_block(block)
+            clean_generic_block(block, entry_map)
 
     for block in clean_blocks:
         if block.header in {"features", "profiles.example.features"}:
             continue
-        clean_generic_block(block)
+        clean_generic_block(block, entry_map)
 
     clean_root = sort_root_scalar_lines(clean_root)
     clean_blocks = sort_block_groups(clean_blocks)
     write_text(args.output_clean, render_toml_blocks(clean_root, clean_blocks))
 
     preserved_runtime_blocks = collect_comment_only_reference_blocks(runtime_text)
+    preserved_runtime_assignments = collect_preserved_runtime_assignment_groups(
+        runtime_text,
+        inventory_entries,
+    )
 
     runtime_output = runtime_doc_with_tomlkit(runtime_text, runtime_remove_paths)
     if runtime_output is None:
@@ -1355,6 +1505,10 @@ def main() -> int:
     runtime_output = restore_missing_runtime_reference_blocks(
         runtime_output,
         preserved_runtime_blocks,
+    )
+    runtime_output = restore_preserved_runtime_assignment_groups(
+        runtime_output,
+        preserved_runtime_assignments,
     )
     write_text(args.output_runtime, runtime_output)
     if args.review_output is not None:

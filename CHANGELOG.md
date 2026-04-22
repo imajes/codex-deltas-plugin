@@ -6,6 +6,57 @@ This repository does not yet use annotated release tags, so the version sections
 below are reconstructed from the committed version metadata and the actual git
 history in this repo.
 
+## [0.6.0] - 2026-04-22
+
+This release hardens non-feature lifecycle classification so runtime cleanup is
+proof-driven instead of defaulting unrecognized keys to removal. Uncertain
+keys now stay visible as `ambiguous`, user-owned operational markers stay
+preserved, and compatibility migrations surface canonical targets instead of
+quietly disappearing as false-positive removals.
+
+### Fixed
+
+- Fixed non-feature lifecycle resolution so only proven removals classify as
+  `removed`; unresolved keys now fall back to `ambiguous` preservation instead
+  of an unconditional removal default.
+- Fixed user-owned operational markers such as
+  `codex_git_changelog_latest_sha`, including comment-encoded entries with
+  attached explanatory comments, so config sync preserves them across runtime
+  rewrites.
+- Fixed compatibility classification for moved or aliased non-feature keys so
+  reorganized paths such as flat web-search location entries and older
+  operational aliases surface `migration_target` values instead of showing up
+  as removals.
+
+### Changed
+
+- Added centralized non-feature lifecycle truth for:
+  - code-backed pre-schema hints
+  - compatibility aliases
+  - moved or reorganized keys with canonical migration targets
+  - explicit operational preserve rules
+  - explicit ambiguous fallback handling
+- Tightened runtime cleanup so only entries explicitly marked for runtime
+  removal participate in deletion, while `operational` and `ambiguous` entries
+  stay preserved.
+- Expanded validation and maintenance summaries to report the new
+  `operational` and `ambiguous` lifecycle buckets alongside the existing
+  states.
+- Generalized dynamic open-object matching so concrete entries under schema
+  maps, including dotted model-migration-style keys, stay classified as active.
+- Bumped the plugin/package metadata to `0.6.0` in packaging, plugin
+  manifest, and lockfile surfaces.
+
+### Tests
+
+- Extended `tests/test_runtime_sync.py` with regression coverage for:
+  - dotted dynamic-map entries under open-shaped schema objects
+  - legacy alias classification with canonical migration targets
+  - moved-key migration targeting for web-search location nesting
+  - preservation of comment-encoded operational markers and their attached
+    comments
+  - ambiguous fallback for unresolved non-feature keys
+
 ## [0.5.2] - 2026-04-20
 
 This release finishes hardening config sync around real runtime path shapes by

@@ -70,7 +70,35 @@ PRE_SCHEMA_PATTERNS = {
         "source": "code",
     },
 }
-DYNAMIC_SCHEMA_SEGMENT_PATTERN = r'(?:[^.]+|"[^"]+"|\'[^\']+\')'
+LEGACY_COMPATIBILITY_RULES = (
+    (
+        re.compile(r"^no_memories_if_mcp_or_web_search$"),
+        "disable_on_external_context",
+        "Legacy compatibility alias; prefer `disable_on_external_context`.",
+    ),
+)
+MOVED_KEY_RULES = (
+    (
+        re.compile(r"^permissions\.network(?:\.(?P<suffix>.+))?$"),
+        lambda match: (
+            "permissions.workspace.network"
+            + (f".{match.group('suffix')}" if match.group("suffix") else "")
+        ),
+        "Legacy permissions networking path; prefer `[permissions.workspace.network]`.",
+    ),
+    (
+        re.compile(r"^tools\.web_search\.(?P<leaf>city|country|region|timezone)$"),
+        lambda match: f"tools.web_search.location.{match.group('leaf')}",
+        "Legacy flat web-search location key; prefer nested `[tools.web_search.location]`.",
+    ),
+)
+OPERATIONAL_KEY_RULES = (
+    (
+        re.compile(r"^codex_git_changelog_latest_sha$"),
+        "User-owned operational marker preserved by codex-deltas lifecycle policy.",
+    ),
+)
+DYNAMIC_SCHEMA_SEGMENT_PATTERN = r'(?:[^.]+(?:\.[^.]+)*|"[^"]+"|\'[^\']+\')'
 FEATURE_COMMENT_FALLBACK = {
     "Stable": "bool; feature toggle.",
     "Experimental": "bool; experimental feature toggle.",
@@ -93,6 +121,15 @@ GENERIC_FEATURE_COMMENTS = {
     "bool; removed feature toggle.",
     "legacy alias; prefer canonical feature key.",
 }
+INVENTORY_SUMMARY_ORDER = (
+    "new",
+    "pre-schema",
+    "operational",
+    "ambiguous",
+    "legacy",
+    "removed",
+    "active",
+)
 
 
 @dataclass(frozen=True)
@@ -125,6 +162,16 @@ class PreSchemaHint:
     pattern: re.Pattern[str]
     note: str
     source: str
+
+
+@dataclass(frozen=True)
+class NonFeatureLifecycleDecision:
+    classification: str
+    source: str
+    clean_policy: str
+    runtime_policy: str
+    note: str
+    migration_target: str | None = None
 
 
 @dataclass
@@ -1152,18 +1199,89 @@ def build_pre_schema_hints(repo_path: Path, *, git_dir: bool = False) -> list[Pr
     return hints
 
 
-def classify_non_feature_key(path: str, pre_schema_hints: list[PreSchemaHint]) -> tuple[str, str, str | None]:
+def lifecycle_policies_for_classification(classification: str) -> tuple[str, str]:
+    if classification == "removed":
+        return ("omit", "remove")
+    if classification == "legacy":
+        return ("commented", "remove")
+    if classification in {"operational", "ambiguous"}:
+        return ("active", "preserve")
+    return ("active", "preserve-or-add")
+
+
+def make_non_feature_lifecycle_decision(
+    classification: str,
+    source: str,
+    note: str,
+    migration_target: str | None = None,
+) -> NonFeatureLifecycleDecision:
+    clean_policy, runtime_policy = lifecycle_policies_for_classification(classification)
+    return NonFeatureLifecycleDecision(
+        classification=classification,
+        source=source,
+        clean_policy=clean_policy,
+        runtime_policy=runtime_policy,
+        note=note,
+        migration_target=migration_target,
+    )
+
+
+def classify_non_feature_key(path: str, pre_schema_hints: list[PreSchemaHint]) -> NonFeatureLifecycleDecision:
     for pattern, metadata in PRE_SCHEMA_PATTERNS.items():
         if pattern.match(path):
-            return ("pre-schema", metadata["source"], None)
+            return make_non_feature_lifecycle_decision(
+                "pre-schema",
+                metadata["source"],
+                metadata["note"],
+            )
     for hint in pre_schema_hints:
         if hint.pattern.match(path):
-            return ("pre-schema", hint.source, None)
+            return make_non_feature_lifecycle_decision(
+                "pre-schema",
+                hint.source,
+                hint.note,
+            )
+    for pattern, target, note in LEGACY_COMPATIBILITY_RULES:
+        if pattern.match(path):
+            return make_non_feature_lifecycle_decision(
+                "legacy",
+                "compatibility",
+                note,
+                migration_target=target,
+            )
     if legacy_key_matches(path):
-        return ("legacy", "compatibility", None)
+        return make_non_feature_lifecycle_decision(
+            "legacy",
+            "compatibility",
+            "Legacy compatibility key; keep comment-only in clean and remove from runtime proposals.",
+        )
+    for pattern, target_factory, note in MOVED_KEY_RULES:
+        match = pattern.match(path)
+        if match:
+            return make_non_feature_lifecycle_decision(
+                "legacy",
+                "compatibility",
+                note,
+                migration_target=target_factory(match),
+            )
+    for pattern, note in OPERATIONAL_KEY_RULES:
+        if pattern.match(path):
+            return make_non_feature_lifecycle_decision(
+                "operational",
+                "operational-policy",
+                note,
+            )
     if path in REMOVED_KEYS:
-        return ("removed", "compatibility", None)
-    return ("removed", "compatibility", None)
+        return make_non_feature_lifecycle_decision(
+            "removed",
+            "compatibility",
+            "Removed from current config model; should not stay in either file.",
+        )
+    return make_non_feature_lifecycle_decision(
+        "ambiguous",
+        "unclassified",
+        "Current truth did not prove this key active, removed, or safely migratable; preserve it for manual review.",
+    )
 
 
 def build_feature_comment(
@@ -1216,22 +1334,22 @@ def extract_new_since(note: str) -> str | None:
     return None
 
 
-def classify_special_key(path: str) -> tuple[str, str, str | None]:
-    for pattern, metadata in PRE_SCHEMA_PATTERNS.items():
-        if pattern.match(path):
-            return ("pre-schema", metadata["source"], None)
-    if legacy_key_matches(path):
-        return ("legacy", "compatibility", None)
-    if path in REMOVED_KEYS:
-        return ("removed", "compatibility", None)
-    return ("unknown", "unclassified", None)
+def classify_special_key(path: str) -> NonFeatureLifecycleDecision:
+    return classify_non_feature_key(path, [])
 
 
 def inventory_summary(entries: list[InventoryEntry]) -> dict[str, int]:
-    counts = {"new": 0, "pre-schema": 0, "legacy": 0, "removed": 0, "active": 0}
+    counts = {key: 0 for key in INVENTORY_SUMMARY_ORDER}
     for entry in entries:
         counts[entry.classification] = counts.get(entry.classification, 0) + 1
     return counts
+
+
+def render_inventory_summary(summary: dict[str, int]) -> str:
+    return " ".join(
+        f"`{key}={summary.get(key, 0)}`"
+        for key in INVENTORY_SUMMARY_ORDER
+    )
 
 
 def to_inventory_payload(entries: list[InventoryEntry], metadata: dict[str, Any]) -> dict[str, Any]:

@@ -31,21 +31,23 @@ def make_inventory_entry(
     *,
     classification: str = "new",
     runtime_policy: str = "preserve-or-add",
+    clean_policy: str = "active",
     default_value=None,
     note: str = "New schema-visible key since comparison baseline.",
     source: str = "schema",
     description: str | None = None,
     canonical_key: str | None = None,
+    migration_target: str | None = None,
 ) -> dict[str, object]:
     return {
         "path": path,
         "classification": classification,
         "source": source,
         "default_value": default_value,
-        "clean_policy": "active",
+        "clean_policy": clean_policy,
         "runtime_policy": runtime_policy,
         "note": note,
-        "migration_target": None,
+        "migration_target": migration_target,
         "is_new": classification == "new",
         "platform_specific": False,
         "description": description,
@@ -225,6 +227,47 @@ show_line_numbers = true
     ]
 
 
+def test_runtime_cleanup_preserves_commented_operational_key_and_attached_comments() -> None:
+    runtime_text = """
+sandbox_mode = "workspace-write"
+temporary_removed = true
+
+# Fail-safe marker for delta automation state
+# codex_git_changelog_latest_sha = "1234567"
+"""
+
+    inventory_entries = [
+        make_inventory_entry(
+            "temporary_removed",
+            classification="removed",
+            runtime_policy="remove",
+            clean_policy="omit",
+            note="Removed from current config model; should not stay in either file.",
+            source="compatibility",
+        ),
+        make_inventory_entry(
+            "codex_git_changelog_latest_sha",
+            classification="operational",
+            runtime_policy="preserve",
+            clean_policy="active",
+            note="User-owned operational marker preserved by codex-deltas lifecycle policy.",
+            source="operational-policy",
+        ),
+    ]
+
+    preserved = sync_config_files.collect_preserved_runtime_assignment_groups(
+        runtime_text,
+        inventory_entries,
+    )
+    output = sync_config_files.runtime_doc_with_tomlkit(runtime_text, {"temporary_removed"})
+    assert output is not None
+    restored = sync_config_files.restore_preserved_runtime_assignment_groups(output, preserved)
+
+    assert "temporary_removed" not in restored
+    assert "# Fail-safe marker for delta automation state" in restored
+    assert '# codex_git_changelog_latest_sha = "1234567"' in restored
+
+
 def test_remove_runtime_doc_path_handles_quoted_project_keys() -> None:
     document = tomlkit.parse(
         """
@@ -302,14 +345,61 @@ def test_flatten_schema_paths_marks_dynamic_object_parents() -> None:
 
 
 def test_classify_non_feature_key_marks_disabled_reason_as_pre_schema() -> None:
-    classification, source, migration_target = shared.classify_non_feature_key(
+    decision = shared.classify_non_feature_key(
         "apps.example.disabled_reason",
         [],
     )
 
-    assert classification == "pre-schema"
-    assert source == "code"
-    assert migration_target is None
+    assert decision.classification == "pre-schema"
+    assert decision.source == "code"
+    assert decision.migration_target is None
+    assert decision.runtime_policy == "preserve-or-add"
+
+
+def test_classify_non_feature_key_marks_legacy_alias_with_migration_target() -> None:
+    decision = shared.classify_non_feature_key(
+        "no_memories_if_mcp_or_web_search",
+        [],
+    )
+
+    assert decision.classification == "legacy"
+    assert decision.source == "compatibility"
+    assert decision.migration_target == "disable_on_external_context"
+    assert decision.runtime_policy == "remove"
+
+
+def test_classify_non_feature_key_marks_moved_web_search_location_key_as_legacy() -> None:
+    decision = shared.classify_non_feature_key(
+        "tools.web_search.city",
+        [],
+    )
+
+    assert decision.classification == "legacy"
+    assert decision.migration_target == "tools.web_search.location.city"
+    assert decision.runtime_policy == "remove"
+
+
+def test_classify_non_feature_key_marks_operational_marker_for_preservation() -> None:
+    decision = shared.classify_non_feature_key(
+        "codex_git_changelog_latest_sha",
+        [],
+    )
+
+    assert decision.classification == "operational"
+    assert decision.source == "operational-policy"
+    assert decision.runtime_policy == "preserve"
+    assert decision.clean_policy == "active"
+
+
+def test_classify_non_feature_key_falls_back_to_ambiguous() -> None:
+    decision = shared.classify_non_feature_key(
+        "mystery.unclassified_key",
+        [],
+    )
+
+    assert decision.classification == "ambiguous"
+    assert decision.source == "unclassified"
+    assert decision.runtime_policy == "preserve"
 
 
 def test_build_pre_schema_hints_does_not_blanket_classify_network_family(
@@ -426,6 +516,44 @@ def test_build_non_feature_entries_marks_dynamic_schema_paths_active() -> None:
     assert entry_map["agents.default.config_file"].source == "schema"
     assert entry_map["agents.default.config_file"].note == "Schema-modeled dynamic key."
     assert entry_map["agents.explorer.description"].classification == "active"
+
+
+def test_build_non_feature_entries_keeps_dynamic_notice_migration_entries_active() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "notice": {
+                "type": "object",
+                "properties": {
+                    "model_migrations": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string",
+                        },
+                    }
+                },
+            }
+        },
+    }
+
+    schema_paths, schema_dynamic_patterns = shared.build_schema_path_index(schema)
+    entries = classify_config_keys.build_non_feature_entries(
+        schema_paths,
+        schema_dynamic_patterns,
+        set(),
+        {
+            "notice.model_migrations.gpt-5.2",
+            "notice.model_migrations.gpt-5.2-codex",
+        },
+        set(),
+        [],
+        [],
+    )
+    entry_map = {entry.path: entry for entry in entries}
+
+    assert entry_map["notice.model_migrations.gpt-5.2"].classification == "active"
+    assert entry_map["notice.model_migrations.gpt-5.2"].note == "Schema-modeled dynamic key."
+    assert entry_map["notice.model_migrations.gpt-5.2-codex"].classification == "active"
 
 
 def test_validate_runtime_permissions_requires_workspace_profile_and_new_shape() -> None:

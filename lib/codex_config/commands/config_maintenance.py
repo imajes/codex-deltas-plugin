@@ -13,6 +13,7 @@ from pathlib import Path
 from codex_config.shared import automation_root
 from codex_config.shared import configured_repo_url
 from codex_config.shared import default_automation_mirror_path
+from codex_config.shared import render_inventory_summary
 
 
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
@@ -187,10 +188,7 @@ def write_placeholder_validation(
         "",
         f"- clean: `{clean}`",
         f"- runtime: `{runtime}`",
-        f"- summary: `new={summary.get('new', 0)}` "
-        f"`pre-schema={summary.get('pre-schema', 0)}` "
-        f"`legacy={summary.get('legacy', 0)}` "
-        f"`removed={summary.get('removed', 0)}`",
+        f"- summary: {render_inventory_summary(summary)}",
         "",
         "## Failures",
         "",
@@ -464,7 +462,7 @@ def main() -> int:
         f"- compare_sha: `{compare_sha or 'none'}`",
         f"- mirror: `{mirror_path}`",
         f"- artifact_dir: `{run_dir}`",
-        f"- classification summary: `new: {inventory['summary'].get('new', 0)}, pre-schema: {inventory['summary'].get('pre-schema', 0)}, legacy: {inventory['summary'].get('legacy', 0)}, removed: {inventory['summary'].get('removed', 0)}`",
+        f"- classification summary: {render_inventory_summary(inventory['summary'])}",
         f"- config findings: `{inventory_path if args.mode != 'alpha-sort-only' else 'not generated'}`",
         f"- synchronized clean artifact: `{clean_output}`",
         f"- canonical clean synced: `{'yes' if validation_result is not None and validation_result.returncode == 0 and args.mode != 'alpha-sort-only' else 'no'}`",

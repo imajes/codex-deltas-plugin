@@ -6,11 +6,11 @@ from pathlib import Path
 from codex_config.shared import InventoryEntry
 from codex_config.shared import SECTION_RE
 from codex_config.shared import TomlBlock
-from codex_config.shared import flatten_toml_paths
 from codex_config.shared import load_feature_specs
 from codex_config.shared import load_json
 from codex_config.shared import parse_key_name
 from codex_config.shared import read_text
+from codex_config.shared import render_inventory_summary
 from codex_config.shared import sort_block_body_lines
 from codex_config.shared import sort_block_groups
 from codex_config.shared import split_toml_blocks
@@ -164,9 +164,7 @@ def main() -> int:
             if clean_feature_keys[key] != default_enabled:
                 failures.append(f"feature default mismatch in clean: {key}")
 
-        clean_paths = flatten_toml_paths(args.clean)
         clean_active_paths = flatten_active_toml_paths(args.clean)
-        runtime_paths = flatten_toml_paths(args.runtime)
         runtime_active_paths = flatten_active_toml_paths(args.runtime)
         for entry in inventory_entries:
             if entry.classification == "removed":
@@ -187,10 +185,7 @@ def main() -> int:
         "",
         f"- clean: `{args.clean}`",
         f"- runtime: `{args.runtime}`",
-        f"- summary: `new={inventory['summary'].get('new', 0)}` "
-        f"`pre-schema={inventory['summary'].get('pre-schema', 0)}` "
-        f"`legacy={inventory['summary'].get('legacy', 0)}` "
-        f"`removed={inventory['summary'].get('removed', 0)}`",
+        f"- summary: {render_inventory_summary(inventory['summary'])}",
         "",
     ]
     if failures:
