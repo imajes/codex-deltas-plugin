@@ -6,6 +6,44 @@ This repository does not yet use annotated release tags, so the version sections
 below are reconstructed from the committed version metadata and the actual git
 history in this repo.
 
+## [0.7.1] - 2026-04-22
+
+This release fixes a false-positive config-sync path leak around commented
+plugin examples and makes the generated config layout more explicit by anchoring
+plugin examples under a real `[plugins]` section.
+
+### Fixed
+
+- Fixed TOML inventory flattening so commented placeholder assignments no longer
+  count as live config keys during classification. This prevents misplaced
+  commented plugin examples from leaking bogus runtime paths such as
+  `marketplaces.<name>.enabled`.
+- Fixed dynamic-schema path indexing for closed object maps so
+  `additionalProperties = false` no longer behaves like an open dynamic object
+  and overmatches unrelated leaf keys.
+- Fixed config orchestration replay for the `b77791c` artifact family so the
+  sync step no longer aborts on fake marketplace leaf keys that were inferred
+  from comments instead of the real schema/runtime state.
+
+### Changed
+
+- Added explicit `[plugins]` anchor blocks to generated clean output and runtime
+  proposals whenever plugin child tables are present and the anchor is missing.
+- When synthesizing that anchor, moved leading plugin-group comments onto the
+  new `[plugins]` block so plugin examples are visually scoped to the correct
+  section instead of hanging off neighboring tables.
+- Bumped the plugin/package metadata to `0.7.1` in packaging, plugin manifest,
+  and lockfile surfaces.
+
+### Tests
+
+- Extended `tests/test_runtime_sync.py` with regression coverage for:
+  - ignoring commented placeholder assignments during TOML path flattening
+  - closed dynamic-object schema maps not overmatching unrelated leaf keys
+  - marketplace false positives falling back to `ambiguous` instead of `active`
+  - explicit `[plugins]` anchors in both clean examples and runtime plugin
+    sections
+
 ## [0.7.0] - 2026-04-22
 
 This release makes config sync relocation-aware so reorganized keys can migrate

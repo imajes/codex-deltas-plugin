@@ -281,6 +281,92 @@ def build_section_prefix(block: TomlBlock | None) -> list[str]:
     return trim_repeated_blank_lines(prefix)
 
 
+def split_leading_comment_lines(lines: list[str]) -> tuple[list[str], list[str]]:
+    index = 0
+    leading: list[str] = []
+    while index < len(lines):
+        line = lines[index]
+        if line.strip() == "" or line.lstrip().startswith("#"):
+            leading.append(line)
+            index += 1
+            continue
+        break
+    return trim_repeated_blank_lines(leading), trim_repeated_blank_lines(lines[index:])
+
+
+def trim_boundary_blank_lines(lines: list[str]) -> list[str]:
+    trimmed = list(lines)
+    while trimmed and trimmed[0] == "":
+        trimmed.pop(0)
+    while trimmed and trimmed[-1] == "":
+        trimmed.pop()
+    return trimmed
+
+
+def split_trailing_group_comment_lines(lines: list[str], header: str) -> tuple[list[str], list[str]]:
+    index = len(lines)
+    while index > 0:
+        line = lines[index - 1]
+        if line.strip() == "" or line.lstrip().startswith("#"):
+            index -= 1
+            continue
+        break
+
+    trailing = trim_boundary_blank_lines(trim_repeated_blank_lines(lines[index:]))
+    if not trailing:
+        return lines, []
+
+    group_markers = (
+        f"# [{header}.",
+        f"`[{header}.",
+    )
+    if not any(marker in line for line in trailing for marker in group_markers):
+        return lines, []
+
+    return trim_repeated_blank_lines(lines[:index]), trailing
+
+
+def ensure_group_anchor_block(blocks: list[TomlBlock], header: str) -> None:
+    if find_block(blocks, header) is not None:
+        return
+
+    child_index = next(
+        (index for index, block in enumerate(blocks) if block.header.startswith(f"{header}.")),
+        None,
+    )
+    if child_index is None:
+        return
+
+    anchor_body: list[str] = []
+    if child_index > 0:
+        previous_block = blocks[child_index - 1]
+        remaining_body, trailing_comments = split_trailing_group_comment_lines(
+            previous_block.body_lines,
+            header,
+        )
+        if trailing_comments:
+            previous_block.body_lines = remaining_body
+            anchor_body.extend(trailing_comments)
+
+    first_child = blocks[child_index]
+    leading_comments, remaining_body = split_leading_comment_lines(first_child.body_lines)
+    if leading_comments:
+        if anchor_body and leading_comments:
+            anchor_body = trim_repeated_blank_lines([*anchor_body, "", *leading_comments])
+        else:
+            anchor_body = leading_comments
+        first_child.body_lines = remaining_body
+
+    blocks.insert(
+        child_index,
+        TomlBlock(
+            header=header,
+            header_line=f"[{header}]",
+            body_lines=anchor_body,
+        ),
+    )
+
+
 def comment_out_assignment_group(group: list[str]) -> list[str]:
     commented = list(group)
     for index, line in enumerate(commented):
@@ -1702,6 +1788,8 @@ def main() -> int:
             continue
         clean_generic_block(block, entry_map)
 
+    ensure_group_anchor_block(clean_blocks, "plugins")
+
     clean_root = sort_root_scalar_lines(clean_root)
     clean_blocks = sort_block_groups(clean_blocks)
     write_text(args.output_clean, render_toml_blocks(clean_root, clean_blocks))
@@ -1749,6 +1837,9 @@ def main() -> int:
         runtime_output,
         preserved_runtime_assignments,
     )
+    runtime_root, runtime_blocks = split_toml_blocks(runtime_output)
+    ensure_group_anchor_block(runtime_blocks, "plugins")
+    runtime_output = render_toml_blocks(runtime_root, runtime_blocks)
     write_text(args.output_runtime, runtime_output)
     if args.review_output is not None:
         write_text(

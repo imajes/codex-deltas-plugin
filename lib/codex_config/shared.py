@@ -713,8 +713,8 @@ def build_schema_path_index(schema: dict[str, Any]) -> tuple[set[str], list[re.P
         if pattern_parts and node_type in {"string", "integer", "number", "boolean", "array", "null"}:
             record_path(literal_parts, pattern_parts, has_dynamic=has_dynamic)
         elif pattern_parts and node_type == "object" and (
-            node.get("additionalProperties") is not None
-            or node.get("patternProperties") is not None
+            isinstance(node.get("additionalProperties"), dict)
+            or isinstance(node.get("patternProperties"), dict)
         ):
             record_path(literal_parts, pattern_parts, has_dynamic=has_dynamic)
 
@@ -840,6 +840,8 @@ def flatten_toml_paths(path: Path) -> set[str]:
         section_match = SECTION_RE.match(raw_line)
         if section_match:
             section_parts = split_header_path(section_match.group("header"))
+            continue
+        if raw_line.lstrip().startswith("#"):
             continue
         key_name = parse_key_name(raw_line)
         if key_name:

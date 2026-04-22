@@ -424,6 +424,77 @@ def test_flatten_schema_paths_marks_dynamic_object_parents() -> None:
     assert "projects.trust_level" not in paths
 
 
+def test_flatten_toml_paths_ignores_commented_example_assignments(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """
+[marketplaces.openai-bundled]
+last_updated = "2026-04-22T17:17:04Z"
+source_type = "local"
+source = "/tmp/openai-bundled"
+
+# [plugins.codex-example]
+# path = "/ABS/PATH/plugin"
+# enabled = false
+
+[plugins."github@openai-curated"]
+enabled = false
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert shared.flatten_toml_paths(config_path) == {
+        "marketplaces.openai-bundled.last_updated",
+        "marketplaces.openai-bundled.source",
+        "marketplaces.openai-bundled.source_type",
+        'plugins."github@openai-curated".enabled',
+    }
+
+
+def test_schema_path_index_does_not_overmatch_closed_dynamic_object_children() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "marketplaces": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "last_updated": {"type": "string"},
+                        "source": {"type": "string"},
+                        "source_type": {"type": "string"},
+                    },
+                },
+            }
+        },
+    }
+
+    schema_paths, schema_dynamic_patterns = shared.build_schema_path_index(schema)
+
+    assert shared.schema_path_is_modeled(
+        "marketplaces.openai-bundled.last_updated",
+        schema_paths,
+        schema_dynamic_patterns,
+    )
+    assert shared.schema_path_is_modeled(
+        "marketplaces.openai-bundled.source_type",
+        schema_paths,
+        schema_dynamic_patterns,
+    )
+    assert not shared.schema_path_is_modeled(
+        "marketplaces.openai-bundled.enabled",
+        schema_paths,
+        schema_dynamic_patterns,
+    )
+    assert not shared.schema_path_is_modeled(
+        "marketplaces.openai-bundled.path",
+        schema_paths,
+        schema_dynamic_patterns,
+    )
+
+
 def test_classify_non_feature_key_marks_disabled_reason_as_pre_schema() -> None:
     decision = shared.classify_non_feature_key(
         "apps.example.disabled_reason",
@@ -656,6 +727,52 @@ def test_build_non_feature_entries_marks_dynamic_schema_paths_active() -> None:
     assert entry_map["agents.default.config_file"].source == "schema"
     assert entry_map["agents.default.config_file"].note == "Schema-modeled dynamic key."
     assert entry_map["agents.explorer.description"].classification == "active"
+
+
+def test_build_non_feature_entries_does_not_mark_bogus_marketplace_leafs_active() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "marketplaces": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "last_updated": {"type": "string"},
+                        "source": {"type": "string"},
+                        "source_type": {"type": "string"},
+                    },
+                },
+            }
+        },
+    }
+
+    schema_paths, schema_dynamic_patterns = shared.build_schema_path_index(schema)
+    entries = classify_config_keys.build_non_feature_entries(
+        schema,
+        schema_paths,
+        schema_dynamic_patterns,
+        set(),
+        {
+            "marketplaces.openai-bundled.enabled",
+            "marketplaces.openai-bundled.last_updated",
+            "marketplaces.openai-bundled.path",
+            "marketplaces.openai-bundled.source_type",
+        },
+        None,
+        set(),
+        [],
+        [],
+    )
+    entry_map = {entry.path: entry for entry in entries}
+
+    assert entry_map["marketplaces.openai-bundled.last_updated"].classification == "active"
+    assert entry_map["marketplaces.openai-bundled.last_updated"].source == "schema"
+    assert entry_map["marketplaces.openai-bundled.source_type"].classification == "active"
+    assert entry_map["marketplaces.openai-bundled.enabled"].classification == "ambiguous"
+    assert entry_map["marketplaces.openai-bundled.enabled"].runtime_policy == "preserve"
+    assert entry_map["marketplaces.openai-bundled.path"].classification == "ambiguous"
 
 
 def test_build_non_feature_entries_keeps_dynamic_notice_migration_entries_active() -> None:
@@ -1007,6 +1124,54 @@ def test_runtime_additions_dynamic_schema_key_without_description_uses_schema_fa
         "schema-defined dynamic setting for `plugins.example.enabled`"
         in review.added_safe_defaults[0].detail
     )
+
+
+def test_ensure_group_anchor_block_adds_plugins_header_for_clean_example_block() -> None:
+    _, blocks = shared.split_toml_blocks(
+        """
+[plugins.example]
+# Section link: https://developers.openai.com/codex/plugins
+# Dynamic key pattern: `[plugins.<name>]`
+enabled = true
+path = "/ABS/PATH/plugin"
+""".strip()
+        + "\n"
+    )
+
+    sync_config_files.ensure_group_anchor_block(blocks, "plugins")
+    rendered = shared.render_toml_blocks([], blocks)
+
+    assert rendered.startswith(
+        "[plugins]\n"
+        "# Section link: https://developers.openai.com/codex/plugins\n"
+        "# Dynamic key pattern: `[plugins.<name>]`\n"
+        "\n"
+        "[plugins.example]\n"
+    )
+    assert 'enabled = true' in rendered
+    assert 'path = "/ABS/PATH/plugin"' in rendered
+
+
+def test_ensure_group_anchor_block_adds_plugins_header_for_runtime_plugin_blocks() -> None:
+    _, blocks = shared.split_toml_blocks(
+        """
+[marketplaces.openai-bundled]
+source = "/tmp/openai-bundled"
+
+# [plugins.codex-example]
+# path = "/ABS/PATH/plugin"
+# enabled = false
+[plugins."github@openai-curated"]
+enabled = false
+""".strip()
+        + "\n"
+    )
+
+    sync_config_files.ensure_group_anchor_block(blocks, "plugins")
+    rendered = shared.render_toml_blocks([], blocks)
+
+    assert "[plugins]\n# [plugins.codex-example]\n# path = \"/ABS/PATH/plugin\"\n# enabled = false\n" in rendered
+    assert '\n[plugins."github@openai-curated"]\nenabled = false\n' in rendered
 
 
 def test_runtime_additions_profile_feature_mirror_uses_root_feature_description() -> None:
