@@ -7,9 +7,9 @@ name = "codex-deltas"
 version = "0.5.2"
 description = "Codex delta workflow skills and supporting tooling"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.14"
 dependencies = [
-    "tomlkit>=0.13,<1",
+    "tomlkit>=0.13",
 ]
 
 [project.scripts]
@@ -23,7 +23,7 @@ codex-delta-update-state = "codex_config.commands.update_state:main"
 
 [dependency-groups]
 dev = [
-    "pytest>=8,<9",
+    "pytest>=9",
 ]
 
 [tool.setuptools]
