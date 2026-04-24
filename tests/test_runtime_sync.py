@@ -969,16 +969,16 @@ existing_feature = true
     assert "experimental_use_freeform_apply_patch" not in proposed
     assert (
         "workspace_dependencies = true  # bool; proposed safe default; "
-        "enable workspace dependency support.; new since 2250fdd"
+        "enable workspace dependency support.; ✨ [2250fdd]"
     ) in proposed
     assert 'notification_condition = "unfocused"' in proposed
     assert "[marketplaces.example]" in proposed
-    assert sync_config_files.EXEMPLAR_BLOCK_COMMENT in proposed
-    assert 'source_type = "git"' in proposed
+    assert "# Example values added by codex-deltas" not in proposed
+    assert 'source_type = "git"  # enum<string>; ⛳;' in proposed
     assert 'source = "https://example.invalid/example-marketplace.git"' in proposed
     assert "[realtime]" in proposed
-    assert 'transport = "websocket"' in proposed
-    assert 'voice = "alloy"' in proposed
+    assert 'transport = "websocket"  # enum<string>; ⛳;' in proposed
+    assert 'voice = "alloy"  # enum<string>; ⛳;' in proposed
     assert [item.path for item in review.added_safe_defaults] == [
         "features.workspace_dependencies",
         "tui.notification_condition",
@@ -1048,8 +1048,8 @@ def test_runtime_additions_pre_schema_without_schema_metadata_become_comment_stu
         in review.added_exemplars[0].detail
     )
     assert review.added_exemplars[0].rendered_lines == [
-        "# disabled_reason =  # value; comment-only review stub; configure manually; "
-        "not yet modeled in current schema; Code-visible app disable reason marker not yet modeled in config schema."
+        "# disabled_reason =  # value; 🧪; "
+        "Code-visible app disable reason marker not yet modeled in config schema."
     ]
 
 
@@ -1235,9 +1235,9 @@ def test_runtime_additions_profile_feature_mirror_uses_root_feature_description(
         "profiles.example.features.apply_patch_streaming_events",
     ]
     assert review.added_exemplars[0].rendered_lines == [
-        "# apply_patch_streaming_events =  # bool; comment-only review stub; configure manually; "
-        "no safe default or exemplar available; stream structured progress while apply_patch input is being generated.; "
-        "new since comparison baseline"
+        "# apply_patch_streaming_events =  # bool; 🧪; "
+        "stream structured progress while apply_patch input is being generated.; "
+        "✨ [comparison baseline]"
     ]
     assert (
         "stream structured progress while apply_patch input is being generated."
@@ -1310,9 +1310,9 @@ def test_runtime_additions_schema_equivalent_nested_path_uses_root_inventory_des
         if item.path == "profiles.example.nested_tool_section.discoverables"
     )
     assert nested.rendered_lines == [
-        "# discoverables =  # array<string>; comment-only review stub; configure manually; "
-        "no safe default or exemplar available; ordered list of discoverable tool identifiers.; "
-        "new since comparison baseline"
+        "# discoverables =  # array<string>; 🧪; "
+        "ordered list of discoverable tool identifiers.; "
+        "✨ [comparison baseline]"
     ]
     assert "ordered list of discoverable tool identifiers." in nested.detail
 
@@ -1542,12 +1542,12 @@ def test_run_config_maintenance_summary_includes_relocation_and_runtime_review_s
                             {
                                 "path": "marketplaces",
                                 "detail": "`[marketplaces.example]` added as an exemplar",
-                                "review_note": "Added as an exemplar and requires manual configuration before applying.",
+                                "review_note": "⛳ Review before applying the exemplar.",
                             },
                             {
                                 "path": "realtime.mode",
                                 "detail": "`realtime.mode` surfaced as a comment-only review stub",
-                                "review_note": "Added as a comment-only stub and requires manual configuration before applying.",
+                                "review_note": "⛳ Review before applying the comment-only stub.",
                             }
                         ],
                         "skipped": [],
@@ -1582,8 +1582,8 @@ def test_run_config_maintenance_summary_includes_relocation_and_runtime_review_s
     assert "### Relocation conflicts" in summary_text
     assert "## Runtime Additions Requiring Review" in summary_text
     assert "### Added with safe defaults" in summary_text
-    assert "### Added as exemplars and requiring manual configuration" in summary_text
-    assert "### Skipped because defaults or exemplars were too ambiguous" in summary_text
+    assert "### ⛳ Added as exemplars and requiring manual configuration" in summary_text
+    assert "### ⛳ Skipped because defaults or exemplars were too ambiguous" in summary_text
     assert "`features.telepathy`" in summary_text
     assert "`marketplaces`" in summary_text
     assert "`realtime.mode`" in summary_text

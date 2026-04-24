@@ -333,10 +333,10 @@ def write_runtime_additions_section(lines: list[str], review_payload: dict[str, 
     sections = [
         ("### Added with safe defaults", review_payload.get("added_safe_defaults", [])),
         (
-            "### Added as exemplars and requiring manual configuration",
+            "### ⛳ Added as exemplars and requiring manual configuration",
             review_payload.get("added_exemplars", []),
         ),
-        ("### Skipped because defaults or exemplars were too ambiguous", review_payload.get("skipped", [])),
+        ("### ⛳ Skipped because defaults or exemplars were too ambiguous", review_payload.get("skipped", [])),
     ]
     for heading, raw_items in sections:
         lines.extend([heading, ""])

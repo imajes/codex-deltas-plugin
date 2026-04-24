@@ -1466,7 +1466,7 @@ def build_feature_comment(
             return f"# {key} = {'true' if default_enabled else 'false'}".ljust(120) + f"# {base}; {suffix}"
         return f"# {key} = {'true' if default_enabled else 'false'}".ljust(120) + f"# {base}"
     if new_since:
-        return f"{key} = {'true' if default_enabled else 'false'}".ljust(120) + f"# {base} # new since {new_since}"
+        return f"{key} = {'true' if default_enabled else 'false'}".ljust(120) + f"# {base} # ✨ [{new_since}]"
     return f"{key} = {'true' if default_enabled else 'false'}".ljust(120) + f"# {base}"
 
 
@@ -1478,7 +1478,7 @@ def gather_inline_comment_lookup(block: TomlBlock) -> dict[str, str]:
             continue
         comment = line.split("#", 1)[1].strip()
         if comment:
-            lookup[key_name] = re.sub(r"\s+#\s+(new since .+|pre-schema)$", "", comment).strip()
+            lookup[key_name] = re.sub(r"\s+#\s+(✨\s+\[[^\]]+\]|pre-schema)$", "", comment).strip()
     return lookup
 
 

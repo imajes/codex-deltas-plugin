@@ -97,9 +97,6 @@ class SchemaShapeIndex:
     object_paths_by_signature: dict[str, list[str]]
 
 
-EXEMPLAR_BLOCK_COMMENT = (
-    "# Example values added by codex-deltas; review and configure before applying."
-)
 MARKETPLACE_EXAMPLE_SOURCE = "https://example.invalid/example-marketplace.git"
 MISSING_DEFAULT = object()
 PATH_DESCRIPTION_OVERRIDES = {
@@ -982,9 +979,9 @@ def new_since_label(entry: dict[str, Any]) -> str:
     note = str(entry.get("note", ""))
     sha = extract_new_since(note)
     if sha:
-        return f"new since {sha}"
+        return f"✨ [{sha}]"
     if entry.get("is_new"):
-        return "new since comparison baseline"
+        return "✨ [comparison baseline]"
     return ""
 
 
@@ -1145,7 +1142,7 @@ def format_runtime_comment(
     if status == "safe-default":
         detail_parts.append("proposed safe default")
     else:
-        detail_parts.append("example value; review before applying")
+        detail_parts.append("⛳")
     detail_parts.append(
         resolve_meaningful_description(
             entry,
@@ -1188,23 +1185,8 @@ def root_has_any_key(root_lines: list[str], key_name: str) -> bool:
     return any(parse_key_name(line) == key_name for line in root_lines)
 
 
-def ensure_exemplar_block_comment(block: TomlBlock) -> None:
-    prefix: list[str] = []
-    body_start = 0
-    while body_start < len(block.body_lines):
-        line = block.body_lines[body_start]
-        if parse_key_name(line):
-            break
-        prefix.append(line)
-        body_start += 1
-    if EXEMPLAR_BLOCK_COMMENT in prefix:
-        return
-    if prefix and prefix[-1] != "":
-        prefix.append("")
-    prefix.append(EXEMPLAR_BLOCK_COMMENT)
-    if body_start < len(block.body_lines):
-        prefix.append("")
-    block.body_lines = trim_repeated_blank_lines(prefix + block.body_lines[body_start:])
+def ensure_exemplar_block_comment(_block: TomlBlock) -> None:
+    return
 
 
 def preferred_enum_value(path: str, enum_values: list[Any]) -> Any | None:
@@ -1276,7 +1258,7 @@ def make_assignment_record(
     review_note = (
         "Added with a safe default."
         if status == "safe-default"
-        else "Added as an example value and requires manual review before applying."
+        else "⛳ Review before applying the example value."
     )
     return RuntimeAdditionRecord(
         path=path,
@@ -1297,7 +1279,6 @@ def make_comment_stub_record(
     inventory_by_path: dict[str, dict[str, Any]] | None = None,
     schema: dict[str, Any] | None = None,
     shape_index: SchemaShapeIndex | None = None,
-    reason: str,
 ) -> RuntimeAdditionRecord:
     parts = split_header_path(path)
     header = ".".join(parts[:-1]) or None
@@ -1305,9 +1286,7 @@ def make_comment_stub_record(
     schema_node = node or {}
     comment_parts = [
         schema_type_label(schema_node),
-        "comment-only review stub",
-        "configure manually",
-        reason,
+        "🧪",
     ]
     comment_parts.append(
         resolve_meaningful_description(
@@ -1328,7 +1307,7 @@ def make_comment_stub_record(
         path=path,
         status="exemplar",
         detail=detail,
-        review_note="Added as a comment-only stub and requires manual configuration before applying.",
+        review_note="⛳ Review before applying the comment-only stub.",
         target_header=header,
         target_key=key_name,
         rendered_lines=[line],
@@ -1402,7 +1381,7 @@ def build_object_exemplar_record(
             shape_index=shape_index,
         )
         comment_only_lines.append(
-            f"# configure `{key_name}` ({child_type}) manually; {child_description}; no safe exemplar could be derived"
+            f"# ⛳ `{key_name}` ({child_type}); {child_description}; no safe exemplar could be derived"
         )
 
     if not rendered_lines and not comment_only_lines:
@@ -1422,7 +1401,7 @@ def build_object_exemplar_record(
         path=entry["path"],
         status="exemplar",
         detail=detail,
-        review_note="Added as an exemplar and requires manual configuration before applying.",
+        review_note="⛳ Review before applying the exemplar.",
         target_header=target_header,
         rendered_lines=[*comment_only_lines, *rendered_lines],
     )
@@ -1478,7 +1457,6 @@ def build_runtime_addition_review(
                         inventory_by_path=inventory_by_path,
                         schema=schema,
                         shape_index=shape_index,
-                        reason="not yet modeled in current schema",
                     )
                 )
                 continue
@@ -1539,7 +1517,6 @@ def build_runtime_addition_review(
                 inventory_by_path=inventory_by_path,
                 schema=schema,
                 shape_index=shape_index,
-                reason="no safe default or exemplar available",
             )
         )
 
